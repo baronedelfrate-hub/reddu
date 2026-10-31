@@ -118,7 +118,11 @@ export default function HomePage() {
       <Helmet>
         <title>Reddu — Gestão inteligente para quem produz e vende</title>
         <meta name="description" content="Sistema completo de gestão de estoque, PDV, NF-e, mercados e atendimento via WhatsApp para produtores de alimentos e pequenas indústrias." />
-        <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+        <meta property="og:title" content="Reddu — Gestão inteligente para quem produz e vende" />
+        <meta property="og:description" content="Estoque por lote, PDV com NF-e, mercados consignados e WhatsApp integrado em um só sistema." />
+        <meta property="og:image" content="/icon-512x512.png" />
+        <meta property="og:type" content="website" />
+        <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;900&display=swap" rel="stylesheet" />
       </Helmet>
 
       <div style={{ fontFamily: "'DM Sans', sans-serif" }} className="bg-white text-gray-900 overflow-x-hidden">
@@ -153,7 +157,11 @@ export default function HomePage() {
                 Começar agora
               </a>
             </div>
-            <button className="md:hidden p-2" onClick={() => setMenuOpen(!menuOpen)}>
+            <button
+              className={`md:hidden p-2 transition-colors ${scrolled || menuOpen ? 'text-gray-900' : 'text-white'}`}
+              aria-label={menuOpen ? 'Fechar menu' : 'Abrir menu'}
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen(!menuOpen)}>
               {menuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
             </button>
           </div>
@@ -163,8 +171,8 @@ export default function HomePage() {
                 <a key={item} href={`#${item.toLowerCase()}`} onClick={() => setMenuOpen(false)}
                   className="block text-sm font-medium text-gray-700 py-1">{item}</a>
               ))}
-              <Link to="/login" className="block text-sm font-medium text-gray-700 py-1">Entrar</Link>
-              <a href={WHATSAPP_URL} target="_blank" rel="noreferrer"
+              <Link to="/login" onClick={() => setMenuOpen(false)} className="block text-sm font-medium text-gray-700 py-1">Entrar</Link>
+              <a href={WHATSAPP_URL} target="_blank" rel="noreferrer" onClick={() => setMenuOpen(false)}
                 className="block bg-red-600 text-white text-center text-sm font-semibold px-5 py-2.5 rounded-xl">
                 Começar agora
               </a>
@@ -211,7 +219,7 @@ export default function HomePage() {
               </div>
               <div className="flex items-center gap-6 mt-10">
                 {[['Sem instalação', Shield], ['Suporte via WhatsApp', Users], ['Dados na nuvem', Zap]].map(([label, Icon]) => (
-                  <div key={label} className="flex items-center gap-2 text-gray-500 text-sm">
+                  <div key={label} className="flex items-center gap-2 text-gray-400 text-sm">
                     <Icon className="h-4 w-4 text-red-500" />
                     <span>{label}</span>
                   </div>
@@ -300,13 +308,13 @@ export default function HomePage() {
                   )}
                   <div className={`bg-gradient-to-br ${plan.color} p-8 h-full`}>
                     <div className="mb-6">
-                      <p className="font-bold tracking-tight text-white/60 text-sm mb-1">{plan.name}</p>
+                      <p className="font-bold tracking-tight text-white/80 text-sm mb-1">{plan.name}</p>
                       <div className="flex items-end gap-1 mb-2">
-                        <span className="text-white/50 text-lg">R$</span>
+                        <span className="text-white/70 text-lg">R$</span>
                         <span className="font-black tracking-tight text-5xl text-white">{plan.price}</span>
-                        <span className="text-white/50 text-sm mb-1">/mês</span>
+                        <span className="text-white/70 text-sm mb-1">/mês</span>
                       </div>
-                      <p className="text-white/50 text-sm">{plan.desc}</p>
+                      <p className="text-white/70 text-sm">{plan.desc}</p>
                     </div>
                     <ul className="space-y-3 mb-8">
                       {plan.items.map((item, j) => (
@@ -331,7 +339,7 @@ export default function HomePage() {
                 </div>
               ))}
             </div>
-            <p className="text-center text-gray-600 text-sm mt-8">
+            <p className="text-center text-gray-400 text-sm mt-8">
               Não tem certeza qual escolher?{' '}
               <a href={WHATSAPP_URL} target="_blank" rel="noreferrer" className="text-red-400 hover:text-red-300 font-semibold">
                 Fale conosco no WhatsApp →
@@ -397,8 +405,8 @@ export default function HomePage() {
               </div>
               <span className="font-bold tracking-tight text-white text-base lowercase">reddu</span>
             </div>
-            <p className="text-gray-600 text-xs">© 2026 Reddu. Todos os direitos reservados.</p>
-            <Link to="/login" className="text-gray-500 hover:text-white text-sm transition-colors">
+            <p className="text-gray-400 text-xs">© 2026 Reddu. Todos os direitos reservados.</p>
+            <Link to="/login" className="text-gray-400 hover:text-white text-sm transition-colors">
               Área do cliente →
             </Link>
           </div>
