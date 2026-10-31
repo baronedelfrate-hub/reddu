@@ -8,6 +8,8 @@ const customSupabaseClient = createClient(supabaseUrl, supabaseAnonKey);
 export default customSupabaseClient;
 
 export { 
+    supabaseUrl,
+    supabaseAnonKey,
     customSupabaseClient,
     customSupabaseClient as supabase,
 };
