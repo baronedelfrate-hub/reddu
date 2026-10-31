@@ -6,6 +6,8 @@ import HeroMockup from '@/components/home/HeroMockup';
 import HowItWorks from '@/components/home/HowItWorks';
 import Segments from '@/components/home/Segments';
 import Faq from '@/components/home/Faq';
+import CardapioDigital from '@/components/home/CardapioDigital';
+import SystemTour from '@/components/home/SystemTour';
 import {
   Package, BarChart3, ShoppingCart, Truck, FileText,
   QrCode, MapPin, Check, ChevronRight, Menu, X,
@@ -13,6 +15,7 @@ import {
 } from 'lucide-react';
 
 const NAV_ITEMS = [
+  { label: 'Cardápio', id: 'cardapio' },
   { label: 'Funcionalidades', id: 'funcionalidades' },
   { label: 'Como funciona', id: 'como-funciona' },
   { label: 'Planos', id: 'planos' },
@@ -148,7 +151,7 @@ export default function HomePage() {
               </div>
               <span className={`font-bold tracking-tight text-2xl lowercase ${scrolled ? 'text-gray-900' : 'text-white'}`}>reddu</span>
             </div>
-            <div className="hidden md:flex items-center gap-8">
+            <div className="hidden lg:flex items-center gap-8">
               {NAV_ITEMS.map(item => (
                 <a key={item.id} href={`#${item.id}`}
                   className={`text-sm font-medium transition-colors ${scrolled ? 'text-gray-600 hover:text-red-600' : 'text-gray-300 hover:text-white'}`}>
@@ -160,7 +163,7 @@ export default function HomePage() {
                 Contato
               </a>
             </div>
-            <div className="hidden md:flex items-center gap-3">
+            <div className="hidden lg:flex items-center gap-3">
               <Link to="/login" className={`text-sm font-medium transition-colors px-4 py-2 ${scrolled ? 'text-gray-600 hover:text-gray-900' : 'text-gray-300 hover:text-white'}`}>
                 Entrar
               </Link>
@@ -170,7 +173,7 @@ export default function HomePage() {
               </a>
             </div>
             <button
-              className={`md:hidden p-2 transition-colors ${scrolled ? 'text-gray-900' : 'text-white'}`}
+              className={`lg:hidden p-2 transition-colors ${scrolled ? 'text-gray-900' : 'text-white'}`}
               aria-label={menuOpen ? 'Fechar menu' : 'Abrir menu'}
               aria-expanded={menuOpen}
               onClick={() => setMenuOpen(!menuOpen)}>
@@ -178,7 +181,7 @@ export default function HomePage() {
             </button>
           </div>
           {menuOpen && (
-            <div className="md:hidden bg-white border-t border-gray-100 px-6 py-4 space-y-4">
+            <div className="lg:hidden bg-white border-t border-gray-100 px-6 py-4 space-y-4">
               {NAV_ITEMS.map(item => (
                 <a key={item.id} href={`#${item.id}`} onClick={() => setMenuOpen(false)}
                   className="block text-sm font-medium text-gray-700 py-1">{item.label}</a>
@@ -217,7 +220,7 @@ export default function HomePage() {
                 <span className="text-red-500">vende.</span>
               </h1>
               <p className="text-lg md:text-xl text-gray-400 mb-10 max-w-2xl leading-relaxed">
-                Do freezer até a venda — controle de estoque por lote, PDV com NF-e, mercados consignados e relatórios que realmente ajudam a decidir.
+                Do freezer até a venda — controle de estoque por lote, PDV com NF-e, cardápio digital com pedidos online, mercados consignados e relatórios que realmente ajudam a decidir.
               </p>
               <div className="flex flex-col sm:flex-row gap-4">
                 <a href={WHATSAPP_URL} target="_blank" rel="noreferrer"
@@ -263,6 +266,8 @@ export default function HomePage() {
           </div>
         </section>
 
+        <CardapioDigital whatsappUrl={WHATSAPP_URL} />
+
         {/* FEATURES */}
         <section id="funcionalidades" className="py-24 bg-white">
           <div className="max-w-6xl mx-auto px-6">
@@ -289,6 +294,7 @@ export default function HomePage() {
           </div>
         </section>
 
+        <SystemTour />
         <HowItWorks />
         <Segments />
 
