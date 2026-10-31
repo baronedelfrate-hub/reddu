@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { handleAuthError } from '@/utils/authErrorHandler';
+import EsqueciSenhaForm from '@/components/auth/EsqueciSenhaForm';
 import loginHero from '@/assets/loginHero';
 import { LogIn, Eye, EyeOff, Loader2, AlertCircle, Package, RefreshCw } from 'lucide-react';
 
@@ -28,6 +29,7 @@ export default function LoginPage() {
   const [globalError, setGlobalError] = useState('');
   const [fieldErrors, setFieldErrors] = useState({});
   const [needsConfirmation, setNeedsConfirmation] = useState(false);
+  const [recuperando, setRecuperando] = useState(() => new URLSearchParams(window.location.search).get('recuperar') === '1');
 
   const emailRef = useRef(null);
   const { login, resendConfirmation, clearAuthSession } = useAuth();
@@ -171,6 +173,9 @@ export default function LoginPage() {
           </div>
 
           <div className="w-full max-w-sm">
+            {recuperando ? (
+              <EsqueciSenhaForm emailInicial={email} onVoltar={() => setRecuperando(false)} />
+            ) : (<>
             <div className="mb-8">
               <h1
                 className="font-bold tracking-tight text-2xl text-gray-900 mb-1">
@@ -225,6 +230,10 @@ export default function LoginPage() {
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <label htmlFor="password" className="text-sm font-semibold text-gray-700">Senha</label>
+                  <button type="button" onClick={() => setRecuperando(true)}
+                    className="text-xs font-semibold text-red-600 hover:text-red-700">
+                    Esqueceu a senha?
+                  </button>
                 </div>
                 <div className="relative">
                   <input
@@ -264,6 +273,7 @@ export default function LoginPage() {
                 )}
               </button>
             </form>
+            </>)}
 
             <div className="mt-8 pt-6 border-t border-gray-100 text-center">
               <p className="text-xs text-gray-400">

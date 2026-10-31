@@ -85,6 +85,7 @@ import CardapioPagamentoPage from './pages/CardapioPagamentoPage';
 import CardapioWhatsappPage from './pages/CardapioWhatsappPage';
 import CardapioItensPage from './pages/CardapioItensPage';
 import CardapioPublicoPage from './pages/CardapioPublicoPage';
+import RedefinirSenhaPage from './pages/RedefinirSenhaPage';
 import PedidosCardapioPage from './pages/PedidosCardapioPage';
 import PedidosAgendadosPage from './pages/PedidosAgendadosPage';
 import CuponsCardapioPage from './pages/CuponsCardapioPage';
@@ -104,6 +105,7 @@ function App() {
             <Route path="/" element={<HomePage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
+            <Route path="/redefinir-senha" element={<RedefinirSenhaPage />} />
             <Route path="/estoque/lote/:id" element={<LotePublicoPage />} />
             <Route path="/cardapio/:slug" element={<CardapioPublicoPage />} />
             
