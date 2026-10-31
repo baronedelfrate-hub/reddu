@@ -2,11 +2,23 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
 import { useAuth } from '@/contexts/AuthContext';
+import HeroMockup from '@/components/home/HeroMockup';
+import HowItWorks from '@/components/home/HowItWorks';
+import Segments from '@/components/home/Segments';
+import Faq from '@/components/home/Faq';
 import {
   Package, BarChart3, ShoppingCart, Truck, FileText,
   QrCode, MapPin, Check, ChevronRight, Menu, X,
   ArrowRight, Star, Zap, Shield, Users, MessageCircle
 } from 'lucide-react';
+
+const NAV_ITEMS = [
+  { label: 'Funcionalidades', id: 'funcionalidades' },
+  { label: 'Como funciona', id: 'como-funciona' },
+  { label: 'Planos', id: 'planos' },
+  { label: 'Depoimentos', id: 'depoimentos' },
+  { label: 'FAQ', id: 'faq' },
+];
 
 const WHATSAPP = '5519988992192';
 const WHATSAPP_MSG = encodeURIComponent('Olá! Tenho interesse no Reddu. Pode me contar mais?');
@@ -118,7 +130,11 @@ export default function HomePage() {
       <Helmet>
         <title>Reddu — Gestão inteligente para quem produz e vende</title>
         <meta name="description" content="Sistema completo de gestão de estoque, PDV, NF-e, mercados e atendimento via WhatsApp para produtores de alimentos e pequenas indústrias." />
-        <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+        <meta property="og:title" content="Reddu — Gestão inteligente para quem produz e vende" />
+        <meta property="og:description" content="Estoque por lote, PDV com NF-e, mercados consignados e WhatsApp integrado em um só sistema." />
+        <meta property="og:image" content="/icon-512x512.png" />
+        <meta property="og:type" content="website" />
+        <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700;900&display=swap" rel="stylesheet" />
       </Helmet>
 
       <div style={{ fontFamily: "'DM Sans', sans-serif" }} className="bg-white text-gray-900 overflow-x-hidden">
@@ -133,10 +149,10 @@ export default function HomePage() {
               <span className={`font-bold tracking-tight text-2xl lowercase ${scrolled ? 'text-gray-900' : 'text-white'}`}>reddu</span>
             </div>
             <div className="hidden md:flex items-center gap-8">
-              {['Funcionalidades', 'Planos', 'Depoimentos'].map(item => (
-                <a key={item} href={`#${item.toLowerCase()}`}
+              {NAV_ITEMS.map(item => (
+                <a key={item.id} href={`#${item.id}`}
                   className={`text-sm font-medium transition-colors ${scrolled ? 'text-gray-600 hover:text-red-600' : 'text-gray-300 hover:text-white'}`}>
-                  {item}
+                  {item.label}
                 </a>
               ))}
               <a href={WHATSAPP_URL} target="_blank" rel="noreferrer"
@@ -153,18 +169,22 @@ export default function HomePage() {
                 Começar agora
               </a>
             </div>
-            <button className="md:hidden p-2" onClick={() => setMenuOpen(!menuOpen)}>
+            <button
+              className={`md:hidden p-2 transition-colors ${scrolled ? 'text-gray-900' : 'text-white'}`}
+              aria-label={menuOpen ? 'Fechar menu' : 'Abrir menu'}
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen(!menuOpen)}>
               {menuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
             </button>
           </div>
           {menuOpen && (
             <div className="md:hidden bg-white border-t border-gray-100 px-6 py-4 space-y-4">
-              {['Funcionalidades', 'Planos', 'Depoimentos'].map(item => (
-                <a key={item} href={`#${item.toLowerCase()}`} onClick={() => setMenuOpen(false)}
-                  className="block text-sm font-medium text-gray-700 py-1">{item}</a>
+              {NAV_ITEMS.map(item => (
+                <a key={item.id} href={`#${item.id}`} onClick={() => setMenuOpen(false)}
+                  className="block text-sm font-medium text-gray-700 py-1">{item.label}</a>
               ))}
-              <Link to="/login" className="block text-sm font-medium text-gray-700 py-1">Entrar</Link>
-              <a href={WHATSAPP_URL} target="_blank" rel="noreferrer"
+              <Link to="/login" onClick={() => setMenuOpen(false)} className="block text-sm font-medium text-gray-700 py-1">Entrar</Link>
+              <a href={WHATSAPP_URL} target="_blank" rel="noreferrer" onClick={() => setMenuOpen(false)}
                 className="block bg-red-600 text-white text-center text-sm font-semibold px-5 py-2.5 rounded-xl">
                 Começar agora
               </a>
@@ -182,13 +202,13 @@ export default function HomePage() {
               style={{ backgroundImage: 'radial-gradient(circle, #ffffff 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
           </div>
 
-          <div className="relative max-w-6xl mx-auto px-6 pt-24 pb-16">
+          <div className="relative max-w-6xl mx-auto px-6 pt-28 pb-20 grid lg:grid-cols-2 gap-14 items-center w-full">
             <div className="max-w-3xl">
               <div className="inline-flex items-center gap-2 bg-red-600/10 border border-red-600/20 text-red-400 text-xs font-semibold px-3 py-1.5 rounded-full mb-6">
                 <Zap className="h-3 w-3" /> Sistema completo para sua produção
               </div>
               <h1 style={{ lineHeight: 1.15 }}
-                className="font-black tracking-tight text-2xl sm:text-3xl md:text-5xl text-white mb-6 break-words">
+                className="font-black tracking-tight text-3xl sm:text-4xl lg:text-5xl text-white mb-6 break-words">
                 Gestão inteligente{' '}
                 <br className="hidden sm:block" />
                 para quem{' '}
@@ -209,14 +229,17 @@ export default function HomePage() {
                   Ver planos <ChevronRight className="h-5 w-5" />
                 </a>
               </div>
-              <div className="flex items-center gap-6 mt-10">
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mt-10">
                 {[['Sem instalação', Shield], ['Suporte via WhatsApp', Users], ['Dados na nuvem', Zap]].map(([label, Icon]) => (
-                  <div key={label} className="flex items-center gap-2 text-gray-500 text-sm">
+                  <div key={label} className="flex items-center gap-2 text-gray-400 text-sm">
                     <Icon className="h-4 w-4 text-red-500" />
                     <span>{label}</span>
                   </div>
                 ))}
               </div>
+            </div>
+            <div className="pb-10 lg:pb-0">
+              <HeroMockup />
             </div>
           </div>
         </section>
@@ -266,6 +289,9 @@ export default function HomePage() {
           </div>
         </section>
 
+        <HowItWorks />
+        <Segments />
+
         {/* PLANS */}
         <section id="planos" className="py-24 bg-[#0F172A]">
           <div className="max-w-6xl mx-auto px-6">
@@ -300,13 +326,13 @@ export default function HomePage() {
                   )}
                   <div className={`bg-gradient-to-br ${plan.color} p-8 h-full`}>
                     <div className="mb-6">
-                      <p className="font-bold tracking-tight text-white/60 text-sm mb-1">{plan.name}</p>
+                      <p className="font-bold tracking-tight text-white/80 text-sm mb-1">{plan.name}</p>
                       <div className="flex items-end gap-1 mb-2">
-                        <span className="text-white/50 text-lg">R$</span>
+                        <span className="text-white/70 text-lg">R$</span>
                         <span className="font-black tracking-tight text-5xl text-white">{plan.price}</span>
-                        <span className="text-white/50 text-sm mb-1">/mês</span>
+                        <span className="text-white/70 text-sm mb-1">/mês</span>
                       </div>
-                      <p className="text-white/50 text-sm">{plan.desc}</p>
+                      <p className="text-white/70 text-sm">{plan.desc}</p>
                     </div>
                     <ul className="space-y-3 mb-8">
                       {plan.items.map((item, j) => (
@@ -331,7 +357,7 @@ export default function HomePage() {
                 </div>
               ))}
             </div>
-            <p className="text-center text-gray-600 text-sm mt-8">
+            <p className="text-center text-gray-400 text-sm mt-8">
               Não tem certeza qual escolher?{' '}
               <a href={WHATSAPP_URL} target="_blank" rel="noreferrer" className="text-red-400 hover:text-red-300 font-semibold">
                 Fale conosco no WhatsApp →
@@ -368,6 +394,8 @@ export default function HomePage() {
           </div>
         </section>
 
+        <Faq />
+
         {/* CTA */}
         <section className="py-24 bg-red-600">
           <div className="max-w-4xl mx-auto px-6 text-center">
@@ -397,8 +425,8 @@ export default function HomePage() {
               </div>
               <span className="font-bold tracking-tight text-white text-base lowercase">reddu</span>
             </div>
-            <p className="text-gray-600 text-xs">© 2026 Reddu. Todos os direitos reservados.</p>
-            <Link to="/login" className="text-gray-500 hover:text-white text-sm transition-colors">
+            <p className="text-gray-400 text-xs">© 2026 Reddu. Todos os direitos reservados.</p>
+            <Link to="/login" className="text-gray-400 hover:text-white text-sm transition-colors">
               Área do cliente →
             </Link>
           </div>
