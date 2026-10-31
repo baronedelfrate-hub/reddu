@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+  <meta name="generator" content="Hostinger Horizons" />
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+
+  <!-- PWA Configuration -->
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#dc2626" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="App Reddu" />
+  <link rel="apple-touch-icon" href="/icon-192x192.png" />
+
+  <title>App Reddu</title>
+
+  <!-- Prévia de link (WhatsApp, Facebook, etc.) -->
+  <meta property="og:title" content="App Reddu" />
+  <meta property="og:description" content="Peça pelo cardápio digital." />
+  <meta property="og:image" content="/icon-512x512.png" />
+  <meta property="og:type" content="website" />
+</head>
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.jsx"></script>
+
+  <!-- Registra o Service Worker -->
+  <script>
+    if ('serviceWorker' in navigator) {
+				window.addEventListener('load', () => {
+					navigator.serviceWorker.register('/sw.js')
+						.then(() => console.log('[PWA] Service Worker registrado'))
+						.catch((err) => console.log('[PWA] Erro ao registrar SW:', err));
+				});
+			}
+  </script>
+</body>
+
+</html>

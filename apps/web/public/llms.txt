@@ -1,0 +1,63 @@
+## Pages
+- [- Estoque 360](/dashboard/eventos/:id): No description available
+- [- Estoque 360](/dashboard/eventos/:id/editar): No description available
+- [Abastecer Bandejas - Estoque 360](/abastecerbandejas): No description available
+- [Abastecer Clássicos - Estoque 360](/abastecerclassicos): No description available
+- [Alertas de Estoque - Estoque 360](/dashboard/alertas): No description available
+- [Assistente IA | Estoque 360](/dashboard/assistente-ia): No description available
+- [Auditoria do Sistema - Estoque 360](/dashboard/logs-auditoria): No description available
+- [Checklist de Mercado - Estoque 360](/dashboard/checklist-mercado): No description available
+- [Comparativo de Mercados - Estoque 360](/comparativo-mercados): No description available
+- [Conferência de Carregamento - Estoque 360](/dashboard/conferencia-carregamento): No description available
+- [Configuração de Etiquetas - Estoque 360](/dashboard/configuracao-etiqueta): No description available
+- [Configurar Composição - Estoque 360](/dashboard/configurar-composicao): No description available
+- [Controle de Bandejas - Estoque 360](/controle-bandejas): No description available
+- [Controle de Produção e Saídas - Estoque 360](/dashboard/relatorio-producao-saidas): No description available
+- [Criar Conta - Sistema de Estoque](/signup): Crie sua conta no sistema de gestão de estoque
+- [Dashboard Completo - Estoque 360](/dashboard): No description available
+- [Detalhes da Venda - Estoque 360](/dashboard/pdv/venda/:id): No description available
+- [Detalhes do Pedido | Estoque 360](/pedidos/:id): No description available
+- [Empresas - Sistema de Estoque](/dashboard/empresas): Gerencie as empresas cadastradas no sistema
+- [Entrar — Estoque 360](/login): No description available
+- [Erro - Lote Não Encontrado](/estoque/lote/:id): No description available
+- [Estoque por Local - Estoque 360](/dashboard/estoque-local): No description available
+- [Eventos - Estoque 360](/dashboard/eventos): No description available
+- [Faturamento de Reabastecimento - Estoque 360](/dashboard/pedido-reabastecimento): No description available
+- [Locais - Sistema de Estoque](/dashboard/locais): Gerencie os locais de armazenamento
+- [Lotes e Validades - Estoque 360](/dashboard/lotes): No description available
+- [Mercados por Produto Danificado - Estoque 360](/relatorio-produto-danificado): No description available
+- [Movimentações - Sistema de Estoque](/dashboard/movimentacoes): Registro de movimentações de estoque
+- [Operação de Mercados - Estoque 360](/dashboard/operacao-mercados): Gerencie estoque, transferências e auditorias diretamente nos pontos de venda com scanner de código de barras.
+- [Padrão de Produtos por Mercado - Estoque 360](/mercadopadraoprodutos): No description available
+- [PDV - Ponto de Venda - Estoque 360](/dashboard/pdv): No description available
+- [PDV Rápido - Estoque 360](/dashboard/pdv-rapido): No description available
+- [Pedido Consignado - Estoque 360](/dashboard/fechamento-mercado-consignado): No description available
+- [Pedidos de Produção | Estoque 360](/pedidos): No description available
+- [Produtos - Sistema de Estoque](/dashboard/produtos): Gerencie os produtos cadastrados
+- [Produzir Bandejas - Estoque 360](/dashboard/produzir-bandejas): No description available
+- [Registrar Bandejas - Estoque 360](/dashboard/registrar-producao-bandejas): No description available
+- [Registrar Devolução - Estoque 360](/devolucao): No description available
+- [Registrar Produção - Estoque 360](/dashboard/registrar-producao): No description available
+- [Registrar Produção Clássicos - Estoque 360](/dashboard/registrar-producao-classicos): No description available
+- [Registrar Venda Clássicos - Estoque 360](/dashboard/venda-classicos): No description available
+- [Relatório Consolidado de Vendas - Estoque 360](/dashboard/relatorio-vendas-consolidado): No description available
+- [Relatório Consolidado por Produto - Estoque 360](/relatorio-consolidado-produto): No description available
+- [Relatório de Auditoria de Mercados - Estoque 360](/relatorio-auditoria-mercado): No description available
+- [Relatório de Auditorias - Estoque 360](/relatorio-auditorias): Visualize e analise todas as auditorias de mercado realizadas.
+- [Relatório de Devoluções por Mercado - Estoque 360](/relatorio-mercado): No description available
+- [Relatório de Produção - Estoque 360](/dashboard/relatorio-producao): No description available
+- [Relatório de Vendas Consolidado - Estoque 360](/dashboard/relatorio-vendas): No description available
+- [Reset Operacional - Administração](/dashboard/admin/reset-operacional): No description available
+- [Transferência - Estoque 360](/transferencia-estoque): No description available
+- [Usuários - Sistema de Estoque](/dashboard/usuarios): Gerencie os usuários da sua empresa
+- [Venda Aplicativo - Estoque 360](/dashboard/venda-aplicativo): No description available
+- [Venda Bandejas](/dashboard/venda-bandejas): No description available
+- [Venda no Mercado - Estoque 360](/venda-mercado): No description available
+- [Vendas Pendentes - Estoque 360](/dashboard/relatorio-vendas-pendentes): No description available
+- [Vendas Pendentes - Estoque 360](/dashboard/vendas-pendentes): No description available
+- [Vendas Reais - Mercados - Estoque 360](/relatorio-vendas-mercado): No description available
+- [Visita ao Mercado - Estoque 360](/auditoria-mercado): No description available
+- [WhatsApp - Clientes - Estoque 360](/dashboard/whatsapp/clientes): Cadastro de clientes/contatos do WhatsApp
+- [WhatsApp - Conversas - Estoque 360](/dashboard/whatsapp/conversas): No description available
+- [WhatsApp - Disparo em Massa - Estoque 360](/dashboard/whatsapp/disparos): No description available
+- [WhatsApp - Relatório - Estoque 360](/dashboard/whatsapp/relatorio): No description available

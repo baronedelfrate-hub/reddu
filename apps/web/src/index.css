@@ -1,0 +1,339 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+
+    /* RED THEME */
+    --primary: 0 84.2% 60.2%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    --accent: 0 84.2% 96%;
+    --accent-foreground: 0 84.2% 40%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 0 84.2% 60.2%;
+
+    --radius: 0.5rem;
+
+    --color-primary: hsl(var(--primary));
+    --color-primary-light: hsl(0, 84.2%, 75%);
+    --color-primary-dark: hsl(0, 84.2%, 45%);
+    --color-primary-foreground: hsl(var(--primary-foreground));
+    --color-secondary: hsl(var(--secondary));
+    --color-error: hsl(var(--destructive));
+
+    /* Report-specific colors */
+    --report-success: 16 100% 50%;
+    --report-warning: 38 92% 50%;
+    --report-critical: 0 84% 60%;
+
+    /* Audit-specific colors */
+    --audit-success: 142 76% 36%;
+    --audit-success-light: 142 71% 45%;
+    --audit-pending: 38 92% 50%;
+    --audit-pending-light: 43 100% 62%;
+    --audit-error: 0 84% 60%;
+    --audit-error-light: 0 72% 51%;
+
+    /* NFC-e specific colors */
+    --status-pending: 38 92% 50%;
+    --status-emitted: 142 76% 36%;
+    --status-error: 0 84% 60%;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+
+    /* RED THEME DARK */
+    --primary: 0 84.2% 60.2%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+
+    --accent: 0 84.2% 20%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 0 84.2% 60.2%;
+
+    /* Report colors for dark mode */
+    --report-success: 142 71% 45%;
+    --report-warning: 38 92% 50%;
+    --report-critical: 0 84% 60%;
+
+    /* Audit colors for dark mode */
+    --audit-success: 142 71% 45%;
+    --audit-success-light: 142 76% 50%;
+    --audit-pending: 43 100% 62%;
+    --audit-pending-light: 48 100% 67%;
+    --audit-error: 0 72% 51%;
+    --audit-error-light: 0 84% 60%;
+
+    /* NFC-e specific colors for dark mode */
+    --status-pending: 43 100% 62%;
+    --status-emitted: 142 71% 45%;
+    --status-error: 0 72% 51%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    overflow-y: auto;
+    overflow-x: hidden;
+    line-height: 1.5;
+    letter-spacing: -0.01em;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply tracking-tight text-gray-900;
+  }
+}
+
+@layer components {
+  .touch-target {
+    @apply min-h-[44px] min-w-[44px];
+  }
+
+  .tablet-scroll {
+    @apply touch-pan-y overscroll-y-contain;
+  }
+
+  .scanner-success {
+    @apply ring-2 ring-emerald-500 border-emerald-500 bg-emerald-50;
+  }
+
+  .scanner-error {
+    @apply ring-2 ring-rose-500 border-rose-500 bg-rose-50;
+  }
+
+  .scanner-active {
+    @apply ring-2 ring-[var(--color-primary)] border-[var(--color-primary)] bg-[var(--color-primary)]/5;
+  }
+
+  /* Checklist specific styles */
+  .checklist-row {
+    @apply transition-colors duration-150 hover:bg-gray-50 border-b border-gray-100;
+  }
+
+  .checklist-header {
+    @apply bg-gray-100 text-gray-600 font-semibold text-sm uppercase tracking-wider sticky top-0;
+  }
+
+  .checklist-input:focus {
+    @apply ring-2 ring-[var(--color-primary)] border-transparent bg-white shadow-md;
+  }
+
+  .badge-venda-direta {
+    @apply bg-emerald-100 text-emerald-800 border-emerald-200;
+  }
+
+  .badge-consignado {
+    @apply bg-amber-100 text-amber-800 border-amber-200;
+  }
+
+  /* Report divergência styles */
+  .divergencia-faltante {
+    @apply bg-amber-50 hover:bg-amber-100 border-l-4 border-amber-500;
+  }
+
+  .divergencia-excedente {
+    @apply bg-blue-50 hover:bg-blue-100 border-l-4 border-blue-500;
+  }
+
+  .divergencia-critica {
+    @apply bg-red-50 hover:bg-red-100 border-l-4 border-red-600 ring-2 ring-red-200;
+  }
+
+  /* Report table styles */
+  .report-table {
+    @apply w-full border-collapse border border-gray-200 rounded-lg overflow-hidden shadow-sm;
+  }
+
+  .report-table thead {
+    @apply bg-gray-50;
+  }
+
+  .report-table th {
+    @apply px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider border-b-2 border-gray-200;
+  }
+
+  .report-table td {
+    @apply px-4 py-3 text-sm text-gray-900 border-b border-gray-100;
+  }
+
+  .report-table tbody tr:hover {
+    @apply bg-gray-50;
+  }
+
+  /* Report status badges */
+  .badge-report-success {
+    @apply bg-emerald-100 text-emerald-800 border border-emerald-300 font-semibold px-3 py-1 rounded-full text-xs;
+  }
+
+  .badge-report-warning {
+    @apply bg-amber-100 text-amber-800 border border-amber-300 font-semibold px-3 py-1 rounded-full text-xs;
+  }
+
+  .badge-report-critical {
+    @apply bg-red-100 text-red-800 border border-red-300 font-semibold px-3 py-1 rounded-full text-xs;
+  }
+
+  /* Audit status badges */
+  .badge-audit-success {
+    @apply bg-green-100 text-green-800 border border-green-300 font-semibold px-3 py-1 rounded-full text-xs shadow-sm;
+  }
+
+  .badge-audit-pending {
+    @apply bg-amber-100 text-amber-800 border border-amber-300 font-semibold px-3 py-1 rounded-full text-xs shadow-sm;
+  }
+
+  .badge-audit-error {
+    @apply bg-red-100 text-red-800 border border-red-300 font-semibold px-3 py-1 rounded-full text-xs shadow-sm;
+  }
+
+  /* Audit modal animations */
+  .audit-success-bounce {
+    animation: audit-success 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  }
+
+  @keyframes audit-success {
+    0% {
+      transform: scale(0.8);
+      opacity: 0;
+    }
+
+    50% {
+      transform: scale(1.1);
+    }
+
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+
+  /* Audit modal transitions */
+  .audit-modal-enter {
+    animation: audit-modal-slide-in 0.3s ease-out;
+  }
+
+  @keyframes audit-modal-slide-in {
+    from {
+      opacity: 0;
+      transform: translateY(-20px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Enhanced toast visibility */
+  .toast-success {
+    @apply bg-green-600 text-white border-green-700 shadow-lg;
+  }
+
+  .toast-error {
+    @apply bg-red-600 text-white border-red-700 shadow-lg;
+  }
+
+  .toast-warning {
+    @apply bg-amber-600 text-white border-amber-700 shadow-lg;
+  }
+
+  /* Smooth loading spinner */
+  .audit-spinner {
+    animation: audit-spin 1s linear infinite;
+  }
+
+  @keyframes audit-spin {
+    from {
+      transform: rotate(0deg);
+    }
+
+    to {
+      transform: rotate(360deg);
+    }
+  }
+}
+
+/* ===== MOBILE PWA FIXES ===== */
+/* Prevent auto-zoom on input focus (iOS/Android) */
+@media screen and (max-width: 768px) {
+
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+
+  /* Prevent viewport resize after modal close */
+  body {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  /* Better touch targets */
+  button,
+  [role="button"] {
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+
+  /* Fix modal height on mobile */
+  [role="dialog"] {
+    max-height: 90dvh;
+    overflow-y: auto;
+  }
+
+  /* Prevent horizontal scroll */
+  .overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
+  }
+}

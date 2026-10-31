@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://app.reddu.com.br/sitemap.xml
