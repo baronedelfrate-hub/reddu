@@ -12,8 +12,8 @@ export default function HeroMockup() {
         src="/screens/dashboard.webp"
         width={1357}
         height={615}
-        label="Painel · Visão geral do negócio"
-        alt="Painel do Reddu com alertas de validade, estoque mínimo e indicadores de produção e vendas"
+        label="Painel · Indicadores do negócio"
+        alt="Painel do Reddu com faturamento, ticket médio, vendas por canal, giro de estoque e top mercados"
       />
       <PhoneFrame
         eager
