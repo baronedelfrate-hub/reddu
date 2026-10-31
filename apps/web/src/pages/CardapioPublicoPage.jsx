@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
-import { supabase } from '@/lib/customSupabaseClient';
+import { supabasePublico as supabase } from '@/lib/publicSupabaseClient';
+import { supabase as supabaseLogado } from '@/lib/customSupabaseClient';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -17,7 +18,32 @@ import {
 import {
   Loader2, UtensilsCrossed, ImageOff, Plus, Minus, ShoppingCart, CheckCircle2, Trash2,
   Home, ClipboardList, Info, ArrowLeft, Tag, Clock, CreditCard, MapPin, Search,
-Coins, User, Smartphone, Store, CalendarDays, Zap, MessageCircle, ExternalLink, Pencil } from 'lucide-react';
+Coins, User, Smartphone, Store, CalendarDays, Zap, MessageCircle, ExternalLink, Pencil, RefreshCw } from 'lucide-react';
+
+// Carregamento do cardápio: se uma consulta travar (rede instável), tenta de novo
+// sozinho em vez de deixar o círculo girando para sempre.
+const TEMPO_LIMITE_CARDAPIO_MS = 10000;
+const TENTATIVAS_CARDAPIO = 3;
+const esperar = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function comTentativas(tarefa) {
+  let ultimoErro;
+  for (let i = 1; i <= TENTATIVAS_CARDAPIO; i += 1) {
+    let timer;
+    const limite = new Promise((_, rejeitar) => {
+      timer = setTimeout(() => rejeitar(new Error('Tempo esgotado ao carregar o cardápio.')), TEMPO_LIMITE_CARDAPIO_MS);
+    });
+    try {
+      return await Promise.race([tarefa(), limite]);
+    } catch (erro) {
+      ultimoErro = erro;
+      if (i < TENTATIVAS_CARDAPIO) await esperar(700 * i);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw ultimoErro;
+}
 
 const DIAS_SEMANA = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
 const RESTRICOES_ALIMENTARES_LABELS = {
@@ -337,6 +363,8 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
   const { toast } = useToast();
 
   const [loading, setLoading] = useState(true);
+  const [erroCarregamento, setErroCarregamento] = useState(false);
+  const [tentativaManual, setTentativaManual] = useState(0);
   const [notFound, setNotFound] = useState(false);
   const [empresa, setEmpresa] = useState(null);
   const [categoriasBrutas, setCategoriasBrutas] = useState([]);
@@ -454,99 +482,105 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
   const [mostrarItens, setMostrarItens] = useState(false);
 
   useEffect(() => {
+    const carregar = async () => {
+      const { data: empresaRows, error: empresaErr } = await supabase
+        .rpc('rpc_get_cardapio_empresa', { p_slug: slug });
+
+      const empresaData = empresaRows?.[0] || null;
+      if (empresaErr) throw empresaErr;
+      if (!empresaData) { setNotFound(true); return; }
+      setEmpresa(empresaData);
+
+      const { data: cats, error: catsErr } = await supabase
+        .from('cardapio_categorias')
+        .select('*')
+        .eq('empresa_id', empresaData.id)
+        .eq('ativo', true)
+        .order('ordem').order('nome');
+      if (catsErr) throw catsErr;
+
+      const mostrarEsgotados = empresaData.cardapio_config?.esgotado_comportamento === 'mostrar_desabilitado';
+      let itensQuery = supabase
+        .from('cardapio_itens')
+        .select('*')
+        .eq('empresa_id', empresaData.id)
+        .order('ordem').order('nome');
+      if (!mostrarEsgotados) itensQuery = itensQuery.eq('ativo', true);
+      const { data: itens, error: itensErr } = await itensQuery;
+      if (itensErr) throw itensErr;
+
+      const comboItemIds = (itens || []).filter((i) => i.combo_quantidade_total != null).map((i) => i.id);
+      let sabores = [];
+      if (comboItemIds.length > 0) {
+        const { data: saboresData, error: saboresErr } = await supabase
+          .from('cardapio_combo_opcoes')
+          .select('*')
+          .in('cardapio_item_id', comboItemIds)
+          .eq('ativo', true)
+          .order('ordem');
+        if (saboresErr) throw saboresErr;
+        sabores = saboresData || [];
+      }
+      const saboresAgrupados = {};
+      sabores.forEach((s) => {
+        saboresAgrupados[s.cardapio_item_id] = saboresAgrupados[s.cardapio_item_id] || [];
+        saboresAgrupados[s.cardapio_item_id].push(s);
+      });
+      setSaboresPorItem(saboresAgrupados);
+
+      // Grupos de adicionais reaproveitáveis vinculados a cada item (ex:
+      // "Molhos extras" usado tanto num salgado quanto numa bebida).
+      const itemIds = (itens || []).map((i) => i.id);
+      let gruposAgrupados = {};
+      if (itemIds.length > 0) {
+        const { data: vinculos, error: vinculosErr } = await supabase
+          .from('cardapio_itens_grupos_adicionais')
+          .select('cardapio_item_id, obrigatorio_override, minimo_override, maximo_override, ordem, cardapio_grupos_adicionais(id, nome, obrigatorio, minimo, maximo, ativo, cardapio_grupos_adicionais_opcoes(id, nome, preco_adicional, ativo, ordem))')
+          .in('cardapio_item_id', itemIds)
+          .order('ordem');
+        if (!vinculosErr) {
+          (vinculos || []).forEach((v) => {
+            const g = v.cardapio_grupos_adicionais;
+            if (!g || !g.ativo) return;
+            const opcoes = (g.cardapio_grupos_adicionais_opcoes || [])
+              .filter((o) => o.ativo)
+              .sort((a, b) => a.ordem - b.ordem);
+            if (opcoes.length === 0) return;
+            gruposAgrupados[v.cardapio_item_id] = gruposAgrupados[v.cardapio_item_id] || [];
+            gruposAgrupados[v.cardapio_item_id].push({
+              id: g.id,
+              nome: g.nome,
+              obrigatorio: v.obrigatorio_override ?? g.obrigatorio,
+              minimo: v.minimo_override ?? g.minimo,
+              maximo: v.maximo_override ?? g.maximo,
+              opcoes,
+            });
+          });
+        }
+      }
+      setGruposPorItem(gruposAgrupados);
+
+      // O filtro por dia da semana e horário do item é feito em useMemo (itensPorCategoria),
+      // pra reavaliar sozinho conforme o relógio anda.
+      setCategoriasBrutas(cats || []);
+      setItensBrutos(itens || []);
+    };
+
     const load = async () => {
       setLoading(true);
       setNotFound(false);
+      setErroCarregamento(false);
       try {
-        const { data: empresaRows, error: empresaErr } = await supabase
-          .rpc('rpc_get_cardapio_empresa', { p_slug: slug });
-
-        const empresaData = empresaRows?.[0] || null;
-        if (empresaErr || !empresaData) { setNotFound(true); setLoading(false); return; }
-        setEmpresa(empresaData);
-
-        const { data: cats, error: catsErr } = await supabase
-          .from('cardapio_categorias')
-          .select('*')
-          .eq('empresa_id', empresaData.id)
-          .eq('ativo', true)
-          .order('ordem').order('nome');
-        if (catsErr) throw catsErr;
-
-        const mostrarEsgotados = empresaData.cardapio_config?.esgotado_comportamento === 'mostrar_desabilitado';
-        let itensQuery = supabase
-          .from('cardapio_itens')
-          .select('*')
-          .eq('empresa_id', empresaData.id)
-          .order('ordem').order('nome');
-        if (!mostrarEsgotados) itensQuery = itensQuery.eq('ativo', true);
-        const { data: itens, error: itensErr } = await itensQuery;
-        if (itensErr) throw itensErr;
-
-        const comboItemIds = (itens || []).filter((i) => i.combo_quantidade_total != null).map((i) => i.id);
-        let sabores = [];
-        if (comboItemIds.length > 0) {
-          const { data: saboresData, error: saboresErr } = await supabase
-            .from('cardapio_combo_opcoes')
-            .select('*')
-            .in('cardapio_item_id', comboItemIds)
-            .eq('ativo', true)
-            .order('ordem');
-          if (saboresErr) throw saboresErr;
-          sabores = saboresData || [];
-        }
-        const saboresAgrupados = {};
-        sabores.forEach((s) => {
-          saboresAgrupados[s.cardapio_item_id] = saboresAgrupados[s.cardapio_item_id] || [];
-          saboresAgrupados[s.cardapio_item_id].push(s);
-        });
-        setSaboresPorItem(saboresAgrupados);
-
-        // Grupos de adicionais reaproveitáveis vinculados a cada item (ex:
-        // "Molhos extras" usado tanto num salgado quanto numa bebida).
-        const itemIds = (itens || []).map((i) => i.id);
-        let gruposAgrupados = {};
-        if (itemIds.length > 0) {
-          const { data: vinculos, error: vinculosErr } = await supabase
-            .from('cardapio_itens_grupos_adicionais')
-            .select('cardapio_item_id, obrigatorio_override, minimo_override, maximo_override, ordem, cardapio_grupos_adicionais(id, nome, obrigatorio, minimo, maximo, ativo, cardapio_grupos_adicionais_opcoes(id, nome, preco_adicional, ativo, ordem))')
-            .in('cardapio_item_id', itemIds)
-            .order('ordem');
-          if (!vinculosErr) {
-            (vinculos || []).forEach((v) => {
-              const g = v.cardapio_grupos_adicionais;
-              if (!g || !g.ativo) return;
-              const opcoes = (g.cardapio_grupos_adicionais_opcoes || [])
-                .filter((o) => o.ativo)
-                .sort((a, b) => a.ordem - b.ordem);
-              if (opcoes.length === 0) return;
-              gruposAgrupados[v.cardapio_item_id] = gruposAgrupados[v.cardapio_item_id] || [];
-              gruposAgrupados[v.cardapio_item_id].push({
-                id: g.id,
-                nome: g.nome,
-                obrigatorio: v.obrigatorio_override ?? g.obrigatorio,
-                minimo: v.minimo_override ?? g.minimo,
-                maximo: v.maximo_override ?? g.maximo,
-                opcoes,
-              });
-            });
-          }
-        }
-        setGruposPorItem(gruposAgrupados);
-
-        // O filtro por dia da semana e horário do item é feito em useMemo (itensPorCategoria),
-        // pra reavaliar sozinho conforme o relógio anda.
-        setCategoriasBrutas(cats || []);
-        setItensBrutos(itens || []);
+        await comTentativas(carregar);
       } catch (error) {
         console.error('Erro ao carregar cardápio público:', error);
-        setNotFound(true);
+        setErroCarregamento(true);
       } finally {
         setLoading(false);
       }
     };
     if (slug) load();
-  }, [slug]);
+  }, [slug, tentativaManual]);
 
   // Abas de categoria: rolar até a seção e destacar a aba da seção visível.
   const irParaCategoria = (id) => {
@@ -1613,7 +1647,8 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
       // essa marcação falhar, o pedido existe do mesmo jeito (fica em
       // Pendentes pra alguém aceitar) — só avisa.
       if (modoBalcao) {
-        const { error: aceiteError } = await supabase.rpc('rpc_aceitar_pedido_cardapio', {
+        // Única chamada que exige usuário logado (atendente): usa a conexão com sessão.
+        const { error: aceiteError } = await supabaseLogado.rpc('rpc_aceitar_pedido_cardapio', {
           p_pedido_id: data.id,
           p_pagamento_confirmado: false,
           p_origem: 'balcao',
@@ -1764,6 +1799,17 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#eceef1]">
         <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+      </div>
+    );
+  }
+
+  if (erroCarregamento) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#eceef1] text-center p-6">
+        <RefreshCw className="h-10 w-10 text-gray-300 mb-3" />
+        <h1 className="text-xl font-semibold text-gray-700">Não foi possível carregar o cardápio</h1>
+        <p className="text-sm text-gray-500 mt-1 mb-4">Verifique sua conexão e tente novamente.</p>
+        <Button onClick={() => setTentativaManual((n) => n + 1)}>Tentar novamente</Button>
       </div>
     );
   }
