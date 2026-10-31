@@ -18,11 +18,11 @@ export default function SystemTour() {
               src="/screens/dashboard.webp"
               width={1357}
               height={615}
-              label="Indicadores financeiros e operacionais"
-              alt="Painel do Reddu: faturamento, ticket médio, consignado pendente, vendas por canal, giro de estoque e top mercados"
+              label="Visão geral do negócio"
+              alt="Painel do Reddu: alertas operacionais de lotes vencidos, vencendo em 7 dias e estoque mínimo, com indicadores do período"
             />
             <figcaption className="mt-4 text-sm text-gray-400">
-              <span className="font-semibold text-white">Indicadores do negócio.</span> Faturamento, ticket médio, vendas por canal, giro de estoque e os mercados que mais vendem.
+              <span className="font-semibold text-white">Visão geral.</span> Alertas de validade e estoque mínimo e os números do período, num só lugar.
             </figcaption>
           </figure>
           <figure className="lg:col-span-2">
