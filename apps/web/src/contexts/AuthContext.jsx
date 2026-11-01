@@ -144,6 +144,15 @@ export function AuthProvider({ children }) {
       if (isLoggingOutRef.current) return;
       
       try {
+        if (event === 'PASSWORD_RECOVERY') {
+          // Link de recuperação aberto fora de /redefinir-senha (ex.: URL de retorno não
+          // cadastrada no Supabase): leva para a tela de nova senha em vez de só logar.
+          sessionStorage.setItem('reddu_recuperacao_senha', '1');
+          if (window.location.pathname !== '/redefinir-senha') {
+            window.location.replace('/redefinir-senha');
+            return;
+          }
+        }
         if (event === 'SIGNED_OUT') {
           await clearAuthSession(true);
         } else if (event === 'TOKEN_REFRESHED' && !session) {
