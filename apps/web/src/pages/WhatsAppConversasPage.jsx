@@ -5,7 +5,6 @@ import { supabase } from '@/lib/customSupabaseClient';
 import DashboardLayout from '@/components/DashboardLayout';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import {
   Dialog,
   DialogContent,
@@ -41,7 +40,6 @@ import {
   MessageCircle,
   MessageSquarePlus,
   Search,
-  User,
   Image as ImageIcon,
   FileText,
   Mic,
@@ -61,7 +59,11 @@ import {
   Archive,
   ArchiveRestore,
   ArrowUpDown,
+  RefreshCw,
 } from 'lucide-react';
+import AvatarContato from '@/components/whatsapp/AvatarContato';
+import { nomeConversa, formatarTelefone, rotuloDia, normalizarNumeroBR, formatarSoHora } from '@/components/whatsapp/utils';
+import { invocarFuncao } from '@/lib/invocarFuncao';
 
 const ICONE_TIPO = {
   image: ImageIcon,
@@ -70,10 +72,6 @@ const ICONE_TIPO = {
   video: Video,
   sticker: Sticker,
 };
-
-function nomeConversa(conversa) {
-  return conversa.whatsapp_clientes?.nome || conversa.nome_exibicao || conversa.telefone_jid?.split('@')[0] || 'Contato';
-}
 
 function formatarHora(dataIso) {
   if (!dataIso) return '';
@@ -87,10 +85,10 @@ function formatarHora(dataIso) {
 }
 
 function IconeStatusMensagem({ status }) {
-  if (status === 'lido') return <CheckCheck className="h-3.5 w-3.5 text-sky-300" />;
-  if (status === 'entregue') return <CheckCheck className="h-3.5 w-3.5 text-emerald-100" />;
-  if (status === 'erro') return <AlertCircle className="h-3.5 w-3.5 text-red-200" />;
-  return <Check className="h-3.5 w-3.5 text-emerald-100" />;
+  if (status === 'lido') return <CheckCheck className="h-3.5 w-3.5 text-sky-500" />;
+  if (status === 'entregue') return <CheckCheck className="h-3.5 w-3.5 text-gray-500" />;
+  if (status === 'erro') return <AlertCircle className="h-3.5 w-3.5 text-red-500" />;
+  return <Check className="h-3.5 w-3.5 text-gray-500" />;
 }
 
 export default function WhatsAppConversasPage() {
@@ -122,6 +120,14 @@ export default function WhatsAppConversasPage() {
   const [loadingClientes, setLoadingClientes] = useState(false);
   const [buscaCliente, setBuscaCliente] = useState('');
   const [iniciandoConversaId, setIniciandoConversaId] = useState(null);
+  const [contatosEncontrados, setContatosEncontrados] = useState([]);
+  const [loadingContatos, setLoadingContatos] = useState(false);
+
+  const [sincronizando, setSincronizando] = useState(false);
+  const [progressoFotos, setProgressoFotos] = useState(null);
+  const fotosTentadasRef = useRef(new Set());
+  const buscandoFotosRef = useRef(false);
+  const montadoRef = useRef(true);
 
   const [isGravando, setIsGravando] = useState(false);
   const [tempoGravacao, setTempoGravacao] = useState(0);
@@ -158,10 +164,10 @@ export default function WhatsAppConversasPage() {
       });
   }, [empresaId]);
 
-  const fetchConversas = useCallback(async () => {
+  const fetchConversas = useCallback(async (silencioso = false) => {
     if (!empresaId) return;
     try {
-      setLoadingConversas(true);
+      if (silencioso !== true) setLoadingConversas(true);
       const { data, error } = await supabase
         .from('whatsapp_conversas')
         .select('*, whatsapp_clientes(nome)')
@@ -196,7 +202,7 @@ export default function WhatsAppConversasPage() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'whatsapp_conversas', filter: `empresa_id=eq.${empresaId}` },
         () => {
-          fetchConversas();
+          fetchConversas(true);
         }
       )
       .subscribe();
@@ -230,6 +236,72 @@ export default function WhatsAppConversasPage() {
     },
     [toast]
   );
+
+  useEffect(() => {
+    montadoRef.current = true;
+    return () => { montadoRef.current = false; };
+  }, []);
+
+  // Busca em segundo plano a foto de quem ainda não tem (uma vez por contato nesta sessão).
+  useEffect(() => {
+    if (!config || buscandoFotosRef.current) return;
+    const novos = conversas.filter((c) => !c.foto_url && !fotosTentadasRef.current.has(c.telefone_jid));
+    if (novos.length === 0) return;
+    novos.forEach((c) => fotosTentadasRef.current.add(c.telefone_jid));
+
+    buscandoFotosRef.current = true;
+    (async () => {
+      let atualizou = false;
+      try {
+        for (let rodada = 0; rodada < 8 && montadoRef.current; rodada += 1) {
+          const r = await invocarFuncao('whatsapp-contatos', { action: 'fotos' });
+          if (r.com_foto > 0) atualizou = true;
+          if (!r.restantes || r.processados === 0) break;
+        }
+      } catch (err) {
+        console.error('Erro ao buscar fotos de perfil:', err);
+      } finally {
+        buscandoFotosRef.current = false;
+        if (atualizou && montadoRef.current) fetchConversas(true);
+      }
+    })();
+  }, [conversas, config, fetchConversas]);
+
+  // Importa os contatos do WhatsApp conectado e depois busca as fotos, em lotes.
+  const handleImportarContatos = async () => {
+    setSincronizando(true);
+    setProgressoFotos(null);
+    try {
+      const r = await invocarFuncao('whatsapp-contatos', { action: 'sincronizar' });
+      toast({
+        title: 'Contatos importados!',
+        description: `${r.total} contato(s), ${r.com_nome} com nome.${r.conversas_nomeadas ? ` ${r.conversas_nomeadas} conversa(s) ganharam nome.` : ''}`,
+        className: 'bg-emerald-600 text-white',
+      });
+      await fetchConversas(true);
+
+      let feitas = 0;
+      let restantes = 1;
+      for (let rodada = 0; rodada < 300 && restantes > 0 && montadoRef.current; rodada += 1) {
+        const f = await invocarFuncao('whatsapp-contatos', { action: 'fotos', todos: true });
+        feitas += f.processados;
+        restantes = f.restantes;
+        setProgressoFotos({ feitas, restantes });
+        if (f.processados === 0) break;
+      }
+      await fetchConversas(true);
+      if (montadoRef.current) toast({ title: 'Fotos de perfil atualizadas.' });
+    } catch (err) {
+      toast({
+        title: 'Não foi possível importar os contatos',
+        description: err.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setSincronizando(false);
+      setProgressoFotos(null);
+    }
+  };
 
   const handleApagarConversa = async () => {
     if (!conversaParaApagar) return;
@@ -384,18 +456,56 @@ export default function WhatsAppConversasPage() {
       });
   }, [novaConversaOpen, empresaId, toast]);
 
+  // Contatos importados do WhatsApp (a busca espera a pessoa parar de digitar)
+  useEffect(() => {
+    if (!novaConversaOpen || !empresaId) return undefined;
+    let cancelado = false;
+    const timer = setTimeout(async () => {
+      setLoadingContatos(true);
+      const termo = buscaCliente.trim();
+      const soNumero = /^[\d\s()+-]+$/.test(termo);
+      let consulta = supabase
+        .from('whatsapp_contatos')
+        .select('id, telefone_jid, telefone, nome, foto_url')
+        .eq('empresa_id', empresaId)
+        .order('nome', { ascending: true, nullsFirst: false })
+        .limit(50);
+      if (termo) {
+        consulta = soNumero
+          ? consulta.ilike('telefone', `%${termo.replace(/\D/g, '')}%`)
+          : consulta.ilike('nome', `%${termo.replace(/[%,]/g, '')}%`);
+      }
+      const { data } = await consulta;
+      if (!cancelado) {
+        setContatosEncontrados(data || []);
+        setLoadingContatos(false);
+      }
+    }, 250);
+    return () => {
+      cancelado = true;
+      clearTimeout(timer);
+    };
+  }, [novaConversaOpen, empresaId, buscaCliente]);
+
   const clientesFiltrados = clientesDisponiveis.filter((c) => {
     const termo = buscaCliente.trim().toLowerCase();
     if (!termo) return true;
     return (c.nome || '').toLowerCase().includes(termo) || (c.telefone || '').includes(termo);
   });
 
-  const handleIniciarConversa = async (cliente) => {
-    if (!empresaId) return;
-    const jid = cliente.telefone_jid || `${cliente.telefone}@s.whatsapp.net`;
+  const telefonesDeClientes = new Set(clientesDisponiveis.map((c) => c.telefone));
+  const contatosFiltrados = contatosEncontrados.filter((c) => !telefonesDeClientes.has(c.telefone));
+  const numeroDigitado = normalizarNumeroBR(buscaCliente);
+  const mostrarNumeroDigitado = !!numeroDigitado
+    && !clientesDisponiveis.some((c) => c.telefone === numeroDigitado)
+    && !contatosEncontrados.some((c) => c.telefone === numeroDigitado);
 
-    // Já existe uma conversa com esse cliente? Só abre ela.
-    const existente = conversas.find((c) => c.telefone_jid === jid);
+  // alvo: { chave, jid, nome, clienteId, fotoUrl } — cliente cadastrado, contato do WhatsApp ou número digitado
+  const handleIniciarConversa = async (alvo) => {
+    if (!empresaId) return;
+
+    // Já existe uma conversa com essa pessoa? Só abre ela.
+    const existente = conversas.find((c) => c.telefone_jid === alvo.jid);
     if (existente) {
       setNovaConversaOpen(false);
       setBuscaCliente('');
@@ -403,20 +513,16 @@ export default function WhatsAppConversasPage() {
       return;
     }
 
-    setIniciandoConversaId(cliente.id);
+    setIniciandoConversaId(alvo.chave);
     try {
+      const registro = { empresa_id: empresaId, telefone_jid: alvo.jid, status: 'aberta' };
+      if (alvo.clienteId) registro.cliente_id = alvo.clienteId;
+      if (alvo.nome) registro.nome_exibicao = alvo.nome;
+      if (alvo.fotoUrl) registro.foto_url = alvo.fotoUrl;
+
       const { data, error } = await supabase
         .from('whatsapp_conversas')
-        .upsert(
-          {
-            empresa_id: empresaId,
-            telefone_jid: jid,
-            cliente_id: cliente.id,
-            nome_exibicao: cliente.nome,
-            status: 'aberta',
-          },
-          { onConflict: 'empresa_id,telefone_jid' }
-        )
+        .upsert(registro, { onConflict: 'empresa_id,telefone_jid' })
         .select('*, whatsapp_clientes(nome)')
         .single();
 
@@ -646,6 +752,10 @@ export default function WhatsAppConversasPage() {
     }
   };
 
+  const conversaAtual = conversaSelecionada
+    ? conversas.find((c) => c.id === conversaSelecionada.id) || conversaSelecionada
+    : null;
+
   const conversasFiltradas = conversas
     .filter((c) => {
       const termo = busca.trim().toLowerCase();
@@ -694,8 +804,8 @@ export default function WhatsAppConversasPage() {
             </p>
           </div>
 
-          <div className="bg-white rounded-lg shadow border border-gray-200 overflow-hidden" style={{ height: '70vh' }}>
-            <div className="grid grid-cols-1 md:grid-cols-[340px_1fr] h-full min-h-0">
+          <div className="bg-white rounded-lg shadow border border-gray-200 overflow-hidden" style={{ height: 'calc(100vh - 200px)', minHeight: 520 }}>
+            <div className="grid grid-cols-1 md:grid-cols-[380px_1fr] h-full min-h-0">
               {/* Lista de conversas */}
               <div
                 className={`border-r border-gray-200 flex flex-col h-full min-h-0 ${
@@ -703,22 +813,41 @@ export default function WhatsAppConversasPage() {
                 }`}
               >
                 <div className="p-3 border-b border-gray-200 space-y-2 flex-shrink-0">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full justify-start gap-2"
-                    onClick={() => setNovaConversaOpen(true)}
-                  >
-                    <MessageSquarePlus className="h-4 w-4" />
-                    Nova conversa
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      className="flex-1 justify-start gap-2 bg-[#00a884] hover:bg-[#019271] text-white"
+                      onClick={() => setNovaConversaOpen(true)}
+                    >
+                      <MessageSquarePlus className="h-4 w-4" />
+                      Nova conversa
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={handleImportarContatos}
+                      disabled={!config || sincronizando}
+                      title="Importar contatos e fotos do WhatsApp"
+                    >
+                      {sincronizando ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                  {sincronizando && (
+                    <p className="text-xs text-gray-500 flex items-center gap-1.5">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      {progressoFotos
+                        ? `Buscando fotos de perfil... faltam ${progressoFotos.restantes}`
+                        : 'Importando contatos do WhatsApp...'}
+                    </p>
+                  )}
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                     <Input
                       value={busca}
                       onChange={(e) => setBusca(e.target.value)}
                       placeholder="Buscar conversa..."
-                      className="pl-9 bg-gray-50 text-gray-900 border-gray-200"
+                      className="pl-9 bg-[#f0f2f5] text-gray-900 border-transparent rounded-lg"
                     />
                   </div>
                   <div className="flex items-center gap-2">
@@ -772,21 +901,24 @@ export default function WhatsAppConversasPage() {
                       return (
                         <div
                           key={conversa.id}
-                          className={`group w-full flex items-start gap-3 px-4 py-3 border-b border-gray-100 hover:bg-gray-50 transition-colors ${
-                            ativa ? 'bg-gray-100' : ''
+                          className={`group w-full flex items-center gap-3 px-3 py-2.5 border-b border-gray-100 hover:bg-[#f5f6f6] transition-colors ${
+                            ativa ? 'bg-[#f0f2f5]' : ''
                           }`}
                         >
                           <button
                             onClick={() => handleSelecionarConversa(conversa)}
-                            className="flex items-start gap-3 flex-1 min-w-0 text-left"
+                            className="flex items-center gap-3 flex-1 min-w-0 text-left"
                           >
-                            <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center flex-shrink-0">
-                              <User className="h-5 w-5" />
-                            </div>
+                            <AvatarContato
+                              nome={nomeConversa(conversa)}
+                              fotoUrl={conversa.foto_url}
+                              chave={conversa.telefone_jid}
+                              tamanho={48}
+                            />
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center justify-between gap-2">
                                 <span className="font-medium text-gray-900 truncate">{nomeConversa(conversa)}</span>
-                                <span className="text-xs text-gray-400 flex-shrink-0">
+                                <span className={`text-xs flex-shrink-0 ${conversa.nao_lidas > 0 ? 'text-[#00a884] font-medium' : 'text-gray-400'}`}>
                                   {formatarHora(conversa.ultima_mensagem_at)}
                                 </span>
                               </div>
@@ -795,7 +927,9 @@ export default function WhatsAppConversasPage() {
                                   {conversa.ultima_mensagem_preview || 'Sem mensagens'}
                                 </span>
                                 {conversa.nao_lidas > 0 && (
-                                  <Badge className="bg-emerald-600 text-white flex-shrink-0">{conversa.nao_lidas}</Badge>
+                                  <span className="bg-[#25d366] text-white text-xs font-semibold rounded-full min-w-[20px] h-5 px-1.5 flex items-center justify-center flex-shrink-0">
+                                    {conversa.nao_lidas}
+                                  </span>
                                 )}
                               </div>
                             </div>
@@ -838,7 +972,7 @@ export default function WhatsAppConversasPage() {
               {/* Thread da conversa selecionada */}
               <div
                 className={`flex-col h-full min-h-0 ${conversaSelecionada ? 'flex' : 'hidden md:flex'}`}
-                style={{ backgroundColor: '#e5ddd5' }}
+                style={{ backgroundColor: '#efeae2' }}
               >
                 {!conversaSelecionada ? (
                   <div className="flex-1 flex items-center justify-center text-gray-400">
@@ -849,7 +983,7 @@ export default function WhatsAppConversasPage() {
                   </div>
                 ) : (
                   <>
-                    <div className="p-3 border-b border-gray-200 bg-white flex items-center gap-3 flex-shrink-0">
+                    <div className="px-4 py-2.5 border-b border-gray-200 bg-[#f0f2f5] flex items-center gap-3 flex-shrink-0">
                       <button
                         className="text-gray-500 hover:text-gray-800 flex items-center gap-1 md:hidden"
                         onClick={() => setConversaSelecionada(null)}
@@ -863,12 +997,15 @@ export default function WhatsAppConversasPage() {
                       >
                         <ArrowLeft className="h-5 w-5" />
                       </button>
-                      <div className="w-9 h-9 rounded-full bg-primary/10 text-primary flex items-center justify-center">
-                        <User className="h-4 w-4" />
-                      </div>
-                      <div className="flex-1">
-                        <p className="font-medium text-gray-900">{nomeConversa(conversaSelecionada)}</p>
-                        <p className="text-xs text-gray-500">{conversaSelecionada.telefone_jid?.split('@')[0]}</p>
+                      <AvatarContato
+                        nome={nomeConversa(conversaAtual)}
+                        fotoUrl={conversaAtual.foto_url}
+                        chave={conversaAtual.telefone_jid}
+                        tamanho={40}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-gray-900 truncate">{nomeConversa(conversaAtual)}</p>
+                        <p className="text-xs text-gray-500">{formatarTelefone(conversaAtual.telefone_jid)}</p>
                       </div>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -896,29 +1033,36 @@ export default function WhatsAppConversasPage() {
                       ) : mensagens.length === 0 ? (
                         <div className="text-center text-gray-500 text-sm">Nenhuma mensagem nessa conversa.</div>
                       ) : (
-                        mensagens.map((msg) => {
+                        mensagens.map((msg, indice) => {
                           const Icone = ICONE_TIPO[msg.tipo];
+                          const rotulo = rotuloDia(msg.timestamp_mensagem);
+                          const mostrarDia = indice === 0 || rotulo !== rotuloDia(mensagens[indice - 1].timestamp_mensagem);
                           return (
+                            <React.Fragment key={msg.id}>
+                              {mostrarDia && rotulo && (
+                                <div className="flex justify-center py-1">
+                                  <span className="bg-white/90 text-gray-600 text-xs px-3 py-1 rounded-lg shadow-sm">{rotulo}</span>
+                                </div>
+                              )}
                             <div
-                              key={msg.id}
                               className={`flex ${msg.from_me ? 'justify-end' : 'justify-start'}`}
                             >
                               <div
                                 className={`max-w-[70%] rounded-lg px-3 py-2 text-sm shadow-sm ${
                                   msg.from_me
-                                    ? 'bg-emerald-600 text-white rounded-br-none'
-                                    : 'bg-white text-gray-900 rounded-bl-none border border-gray-200'
+                                    ? 'bg-[#d9fdd3] text-gray-900 rounded-tr-none'
+                                    : 'bg-white text-gray-900 rounded-tl-none'
                                 }`}
                               >
                                 {msg.from_me && msg.remetente_user_id && (
-                                  <p className="text-[11px] font-semibold mb-0.5 text-emerald-100">
+                                  <p className="text-[11px] font-semibold mb-0.5 text-emerald-700">
                                     {msg.remetente_user_id === user?.id
                                       ? 'Você'
                                       : usuariosMap[msg.remetente_user_id] || 'Atendente'}
                                   </p>
                                 )}
                                 {Icone && !(msg.tipo === 'audio' && msg.media_url) && (
-                                  <div className={`flex items-center gap-1 mb-1 text-xs ${msg.from_me ? 'text-emerald-100' : 'text-gray-500'}`}>
+                                  <div className="flex items-center gap-1 mb-1 text-xs text-gray-500">
                                     <Icone className="h-3.5 w-3.5" />
                                     <span className="uppercase tracking-wide">{msg.tipo}</span>
                                   </div>
@@ -937,7 +1081,7 @@ export default function WhatsAppConversasPage() {
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className={`flex items-center gap-2 rounded-md p-2 mb-1 ${
-                                      msg.from_me ? 'bg-emerald-700/40' : 'bg-gray-100'
+                                      msg.from_me ? 'bg-black/5' : 'bg-gray-100'
                                     }`}
                                   >
                                     <FileText className="h-5 w-5 flex-shrink-0" />
@@ -957,22 +1101,21 @@ export default function WhatsAppConversasPage() {
                                   return <p className="whitespace-pre-wrap break-words">{msg.conteudo}</p>;
                                 })()}
                                 <p
-                                  className={`text-[10px] mt-1 text-right flex items-center justify-end gap-1 ${
-                                    msg.from_me ? 'text-emerald-100' : 'text-gray-400'
-                                  }`}
+                                  className="text-[10px] mt-1 text-right flex items-center justify-end gap-1 text-gray-500"
                                 >
-                                  {formatarHora(msg.timestamp_mensagem)}
+                                  {formatarSoHora(msg.timestamp_mensagem)}
                                   {msg.from_me && <IconeStatusMensagem status={msg.status} />}
                                 </p>
                               </div>
                             </div>
+                            </React.Fragment>
                           );
                         })
                       )}
                       <div ref={mensagensEndRef} />
                     </div>
 
-                    <div className="border-t border-gray-200 bg-white flex-shrink-0">
+                    <div className="border-t border-gray-200 bg-[#f0f2f5] flex-shrink-0">
                       {isGravando ? (
                         <div className="p-3 flex items-center gap-3">
                           <Button
@@ -1032,7 +1175,7 @@ export default function WhatsAppConversasPage() {
                             />
                             <Button
                               type="button"
-                              variant="outline"
+                              variant="ghost"
                               size="icon"
                               onClick={() => fileInputRef.current?.click()}
                               disabled={!config || isEnviando}
@@ -1051,12 +1194,12 @@ export default function WhatsAppConversasPage() {
                                   : 'Digite uma mensagem...'
                               }
                               disabled={!config || isEnviando}
-                              className="bg-gray-50 text-gray-900 border-gray-200"
+                              className="bg-white text-gray-900 border-transparent rounded-lg"
                             />
                             {!textoNovo.trim() && !arquivoSelecionado ? (
                               <Button
                                 type="button"
-                                variant="outline"
+                                variant="ghost"
                                 size="icon"
                                 onClick={iniciarGravacao}
                                 disabled={!config || isEnviando}
@@ -1068,6 +1211,7 @@ export default function WhatsAppConversasPage() {
                               <Button
                                 type="submit"
                                 size="icon"
+                                className="rounded-full bg-[#00a884] hover:bg-[#019271] text-white"
                                 disabled={!config || isEnviando || (!textoNovo.trim() && !arquivoSelecionado)}
                               >
                                 {isEnviando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
@@ -1089,7 +1233,7 @@ export default function WhatsAppConversasPage() {
             <DialogHeader>
               <DialogTitle className="text-xl font-bold text-gray-900">Nova conversa</DialogTitle>
               <DialogDescription className="text-gray-600">
-                Escolha um cliente cadastrado para iniciar (ou retomar) uma conversa.
+                Escolha um contato do WhatsApp ou um cliente cadastrado, ou digite um número com DDD.
               </DialogDescription>
             </DialogHeader>
 
@@ -1098,48 +1242,98 @@ export default function WhatsAppConversasPage() {
               <Input
                 value={buscaCliente}
                 onChange={(e) => setBuscaCliente(e.target.value)}
-                placeholder="Buscar por nome ou telefone..."
+                placeholder="Buscar por nome ou digitar um número..."
                 className="pl-9 bg-white text-gray-900 border-gray-300"
                 autoFocus
               />
             </div>
 
             <div className="flex-1 overflow-y-auto min-h-0 -mx-6 px-6">
-              {loadingClientes ? (
-                <div className="py-8 text-center text-gray-500 text-sm">Carregando clientes...</div>
-              ) : clientesFiltrados.length === 0 ? (
-                <div className="py-8 text-center text-gray-500 text-sm">
-                  {clientesDisponiveis.length === 0 ? (
-                    <>
-                      Nenhum cliente cadastrado ainda.
-                      <br />
-                      Cadastre em WhatsApp {'>'} Clientes primeiro.
-                    </>
-                  ) : (
-                    'Nenhum cliente encontrado para essa busca.'
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-1 py-1">
-                  {clientesFiltrados.map((cliente) => (
-                    <button
-                      key={cliente.id}
-                      onClick={() => handleIniciarConversa(cliente)}
-                      disabled={iniciandoConversaId === cliente.id}
-                      className="w-full text-left px-3 py-2 rounded-md flex items-center gap-3 hover:bg-gray-100 transition-colors disabled:opacity-50"
-                    >
-                      <div className="w-9 h-9 rounded-full bg-primary/10 text-primary flex items-center justify-center flex-shrink-0">
-                        <User className="h-4 w-4" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-gray-900 truncate">{cliente.nome}</p>
-                        <p className="text-xs text-gray-500">{cliente.telefone}</p>
-                      </div>
-                      {iniciandoConversaId === cliente.id && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
-                    </button>
-                  ))}
-                </div>
-              )}
+              {(() => {
+                const linha = (alvo, titulo, subtitulo) => (
+                  <button
+                    key={alvo.chave}
+                    onClick={() => handleIniciarConversa(alvo)}
+                    disabled={iniciandoConversaId === alvo.chave}
+                    className="w-full text-left px-3 py-2 rounded-md flex items-center gap-3 hover:bg-gray-100 transition-colors disabled:opacity-50"
+                  >
+                    <AvatarContato nome={titulo} fotoUrl={alvo.fotoUrl} chave={alvo.jid} tamanho={40} />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-gray-900 truncate">{titulo}</p>
+                      <p className="text-xs text-gray-500">{subtitulo}</p>
+                    </div>
+                    {iniciandoConversaId === alvo.chave && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
+                  </button>
+                );
+                const cabecalho = (texto) => (
+                  <p className="px-3 pt-3 pb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">{texto}</p>
+                );
+                const carregando = loadingClientes || loadingContatos;
+                const vazio = clientesFiltrados.length === 0 && contatosFiltrados.length === 0 && !mostrarNumeroDigitado;
+
+                if (carregando && vazio) {
+                  return <div className="py-8 text-center text-gray-500 text-sm">Carregando...</div>;
+                }
+                if (vazio) {
+                  return (
+                    <div className="py-8 text-center text-gray-500 text-sm">
+                      {buscaCliente.trim()
+                        ? 'Nenhum contato encontrado. Digite o número com DDD para iniciar uma conversa.'
+                        : (
+                          <>
+                            Nenhum contato ainda.
+                            <br />
+                            Use o botão de importar contatos na lista de conversas.
+                          </>
+                        )}
+                    </div>
+                  );
+                }
+                return (
+                  <div className="py-1">
+                    {mostrarNumeroDigitado && (
+                      <>
+                        {cabecalho('Número digitado')}
+                        {linha(
+                          { chave: 'numero', jid: `${numeroDigitado}@s.whatsapp.net`, nome: null },
+                          `Conversar com ${formatarTelefone(numeroDigitado)}`,
+                          'Número que ainda não está nos seus contatos',
+                        )}
+                      </>
+                    )}
+                    {clientesFiltrados.length > 0 && (
+                      <>
+                        {cabecalho('Clientes')}
+                        {clientesFiltrados.map((cliente) =>
+                          linha(
+                            {
+                              chave: cliente.id,
+                              jid: cliente.telefone_jid || `${cliente.telefone}@s.whatsapp.net`,
+                              nome: cliente.nome,
+                              clienteId: cliente.id,
+                              fotoUrl: contatosEncontrados.find((c) => c.telefone === cliente.telefone)?.foto_url || null,
+                            },
+                            cliente.nome,
+                            formatarTelefone(cliente.telefone),
+                          ),
+                        )}
+                      </>
+                    )}
+                    {contatosFiltrados.length > 0 && (
+                      <>
+                        {cabecalho('Contatos do WhatsApp')}
+                        {contatosFiltrados.map((contato) =>
+                          linha(
+                            { chave: contato.id, jid: contato.telefone_jid, nome: contato.nome, fotoUrl: contato.foto_url },
+                            contato.nome || formatarTelefone(contato.telefone_jid),
+                            formatarTelefone(contato.telefone_jid),
+                          ),
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           </DialogContent>
         </Dialog>
