@@ -68,22 +68,18 @@ export default function OrcamentoAprovacaoPage() {
 
   const loadEvento = async () => {
     try {
-      const { data: ev, error } = await supabase.from('eventos').select('*').eq('token_aprovacao', token).single();
+      // Leitura pelo token via função do banco: devolve só os campos que a tela
+      // precisa (sem CPF completo, IP, e-mail ou id da empresa).
+      const { data: orc, error } = await supabase.rpc('rpc_get_orcamento_publico', { p_token: token });
+      const ev = orc?.evento;
       if (error || !ev) { setErro('Orçamento não encontrado.'); setIsLoading(false); return; }
       if (ev.status === 'cancelado') { setErro('Este orçamento foi cancelado.'); setIsLoading(false); return; }
       setEvento(ev);
       if (ev.aprovado_em) setAprovado(true);
       if (ev.aprovado_nome) setNomeCliente(ev.aprovado_nome);
-      const [{ data: its }, { data: srvs }] = await Promise.all([
-        supabase.from('evento_itens').select('*').eq('evento_id', ev.id).order('created_at'),
-        supabase.from('evento_servicos').select('*').eq('evento_id', ev.id).order('created_at'),
-      ]);
-      setItens(its || []);
-      setServicos(srvs || []);
-      if (ev.empresa_id) {
-        const { data: emp } = await supabase.from('empresas').select('logo_url').eq('id', ev.empresa_id).single();
-        if (emp?.logo_url) setLogoUrl(emp.logo_url);
-      }
+      setItens(orc.itens || []);
+      setServicos(orc.servicos || []);
+      if (orc.logo_url) setLogoUrl(orc.logo_url);
     } catch { setErro('Erro ao carregar orçamento.'); }
     finally { setIsLoading(false); }
   };
@@ -123,20 +119,23 @@ export default function OrcamentoAprovacaoPage() {
     try {
       let ip = 'desconhecido';
       try { const r = await fetch('https://api.ipify.org?format=json'); const d = await r.json(); ip = d.ip; } catch { }
-      const agora = new Date().toISOString();
-      const { error } = await supabase.from('eventos').update({
-        status: 'confirmado',
-        aprovado_em: agora,
-        aprovado_ip: ip,
-        aprovado_nome: nomeCliente.trim(),
-        aprovado_cpf: cpfCliente.replace(/\D/g, ''),
-        aprovado_email: emailCliente.trim().toLowerCase(),
-        aprovado_user_agent: navigator.userAgent,
-      }).eq('token_aprovacao', token);
+      // Aprovação por função do banco (a tabela não aceita mais escrita de visitante).
+      // A data/hora, o IP e o navegador são registrados pelo servidor.
+      const { data: aprovacao, error } = await supabase.rpc('rpc_aprovar_orcamento_publico', {
+        p_token: token,
+        p_nome: nomeCliente.trim(),
+        p_cpf: cpfCliente.replace(/\D/g, ''),
+        p_email: emailCliente.trim().toLowerCase(),
+        p_ip: ip,
+        p_user_agent: navigator.userAgent,
+      });
       if (error) throw error;
+      const agora = aprovacao?.aprovado_em || new Date().toISOString();
 
       try {
-        const { data: empresaData } = await supabase.from('empresas').select('email, nome_fantasia').eq('id', evento.empresa_id).single();
+        // A tabela de empresas não é mais legível por visitante (e ela não tem colunas
+        // email/nome_fantasia): o aviso para a empresa continua desativado, como já estava.
+        const empresaData = null;
         const cpfFmt = cpfCliente.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
         const dataFmt = new Date(agora).toLocaleString('pt-BR');
 
