@@ -30,17 +30,16 @@ export default function LotePublicoPage() {
         setLoading(true);
         setError(null);
 
-        const { data: lote, error: loteError } = await supabase
-          .from('lotes').select('*').eq('id', id).single();
+        // Leitura pública do lote por função do banco (a tabela de lotes não é mais
+        // legível por visitante): devolve só os dados exibidos nesta página.
+        const { data: lote, error: loteError } = await supabase.rpc('rpc_get_lote_publico', { p_id: id });
         if (loteError || !lote) throw new Error('Lote não encontrado ou indisponível.');
 
-        const { data: produto } = await supabase
-          .from('produtos').select('nome').eq('id', lote.produto_id).single();
-
-        const { data: local } = await supabase
-          .from('locais').select('nome').eq('id', lote.local_id).single();
-
-        setLoteData({ ...lote, produto_nome: produto?.nome || 'Produto desconhecido', local_nome: local?.nome || 'Local desconhecido' });
+        setLoteData({
+          ...lote,
+          produto_nome: lote.produto_nome || 'Produto desconhecido',
+          local_nome: lote.local_nome || 'Local desconhecido',
+        });
         setQuantidade(String(lote.quantidade || 1));
       } catch (err) {
         setError(err.message || "Erro ao buscar informações do lote.");
@@ -83,10 +82,14 @@ export default function LotePublicoPage() {
       setTransferSuccess(true);
 
       // Refresh lote data
-      const { data: loteAtualizado } = await supabase.from('lotes').select('*').eq('id', id).single();
-      const { data: localNovo } = await supabase.from('locais').select('nome').eq('id', destinoId).single();
+      const { data: loteAtualizado } = await supabase.rpc('rpc_get_lote_publico', { p_id: id });
       if (loteAtualizado) {
-        setLoteData(prev => ({ ...prev, ...loteAtualizado, local_nome: localNovo?.nome || prev.local_nome }));
+        setLoteData(prev => ({
+          ...prev,
+          ...loteAtualizado,
+          produto_nome: loteAtualizado.produto_nome || prev.produto_nome,
+          local_nome: loteAtualizado.local_nome || prev.local_nome,
+        }));
       }
 
       setTimeout(() => { setShowTransfer(false); setTransferSuccess(false); setDestinoId(''); }, 2000);
