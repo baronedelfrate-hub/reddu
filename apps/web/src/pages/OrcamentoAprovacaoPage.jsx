@@ -157,7 +157,7 @@ export default function OrcamentoAprovacaoPage() {
             + '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:14px;margin-bottom:16px;"><p style="font-size:13px;color:#991b1b;margin:0;">Para confirmar o evento, realize o pagamento da entrada de <strong>R$ ' + Number(evento.valor_entrada || 0).toFixed(2).replace('.', ',') + '</strong> e entre em contato pelo WhatsApp.</p></div>'
             + '<p style="font-size:12px;color:#9ca3af;text-align:center;margin:0;">Rua Cerqueira César, 755 | Centro | Indaiatuba/SP · @tocoxinha</p>'
             + '</div></div>';
-          await supabase.functions.invoke('send-email', { body: { to: emailCliente.trim(), subject: 'Evento confirmado — ' + evento.nome_cliente, html: htmlCliente } });
+          await supabase.functions.invoke('send-email', { body: { orcamento_token: token, to: emailCliente.trim(), subject: 'Evento confirmado — ' + evento.nome_cliente, html: htmlCliente } });
         }
 
         if (empresaData?.email) {
@@ -176,7 +176,7 @@ export default function OrcamentoAprovacaoPage() {
             + '</table>'
             + '<p style="font-size:12px;color:#9ca3af;text-align:center;margin:0;">Este e-mail foi gerado automaticamente pelo Estoque 360.</p>'
             + '</div></div>';
-          await supabase.functions.invoke('send-email', { body: { to: empresaData.email, subject: 'Evento confirmado — ' + evento.nome_cliente, html: htmlEmpresa } });
+          await supabase.functions.invoke('send-email', { body: { orcamento_token: token, to: empresaData.email, subject: 'Evento confirmado — ' + evento.nome_cliente, html: htmlEmpresa } });
         }
       } catch (emailErr) { console.error('Erro ao enviar email:', emailErr); }
 
