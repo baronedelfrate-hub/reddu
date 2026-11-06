@@ -32,6 +32,7 @@ import {
   Sparkles,
   QrCode,
   Bell,
+  PowerOff,
 } from 'lucide-react';
 
 const STATUS_BADGE = {
@@ -50,6 +51,8 @@ export default function WhatsAppConfiguracaoPage() {
   const { toast } = useToast();
 
   const [isLoading, setIsLoading] = useState(true);
+  const [configExiste, setConfigExiste] = useState(false);
+  const [isDesconectando, setIsDesconectando] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isTestingStatus, setIsTestingStatus] = useState(false);
   const [isSendingTest, setIsSendingTest] = useState(false);
@@ -67,7 +70,7 @@ export default function WhatsAppConfiguracaoPage() {
 
   const [formData, setFormData] = useState({
     instance_name: '',
-    base_url: 'https://evo.barobot.com.br',
+    base_url: '',
     phone_number: '',
     status: 'desconhecido',
     resposta_automatica_ativa: false,
@@ -77,9 +80,9 @@ export default function WhatsAppConfiguracaoPage() {
   const [testeNumero, setTesteNumero] = useState('');
   const [testeTexto, setTesteTexto] = useState('Olá! Esta é uma mensagem de teste do Estoque 360.');
 
-  const fetchConfig = useCallback(async () => {
+  const fetchConfig = useCallback(async (silencioso = false) => {
     if (!empresaId) return;
-    setIsLoading(true);
+    if (silencioso !== true) setIsLoading(true);
     try {
       const { data, error } = await supabase
         .from('whatsapp_configuracoes')
@@ -89,10 +92,11 @@ export default function WhatsAppConfiguracaoPage() {
 
       if (error) throw error;
 
+      setConfigExiste(!!data);
       if (data) {
         setFormData({
           instance_name: data.instance_name || '',
-          base_url: data.base_url || 'https://evo.barobot.com.br',
+          base_url: data.base_url || '',
           phone_number: data.phone_number || '',
           status: data.status || 'desconhecido',
           resposta_automatica_ativa: data.resposta_automatica_ativa || false,
@@ -115,47 +119,42 @@ export default function WhatsAppConfiguracaoPage() {
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
+  // Chama a função de servidor que cria/gerencia a instância da empresa. A URL do
+  // servidor e o nome da instância nunca saem do navegador: a função usa os gravados no banco.
+  const invocarInstancia = async (action) => {
+    const { data, error } = await supabase.functions.invoke('whatsapp-instancia', { body: { action } });
+    if (error) {
+      let mensagem = error.message;
+      try {
+        const corpo = await error.context?.json?.();
+        if (corpo?.error) mensagem = corpo.error;
+      } catch (_) { /* mantém a mensagem padrão */ }
+      throw new Error(mensagem);
+    }
+    if (data?.error) throw new Error(data.error);
+    return data;
+  };
+
   const handleSave = async (e) => {
     e.preventDefault();
-    if (!empresaId) return;
-
-    if (!formData.instance_name || !formData.base_url) {
-      toast({
-        title: 'Campos obrigatórios',
-        description: 'Preencha o nome da instância e a URL do servidor.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    if (!formData.base_url.startsWith('https://')) {
-      toast({
-        title: 'URL inválida',
-        description: 'A URL do servidor deve começar com https://',
-        variant: 'destructive',
-      });
-      return;
-    }
+    if (!empresaId || !configExiste) return;
 
     setIsSaving(true);
     try {
-      const { error } = await supabase.from('whatsapp_configuracoes').upsert(
-        {
-          empresa_id: empresaId,
-          instance_name: formData.instance_name,
-          base_url: formData.base_url.replace(/\/+$/, ''),
+      const { error } = await supabase
+        .from('whatsapp_configuracoes')
+        .update({
           phone_number: formData.phone_number || null,
           resposta_automatica_ativa: formData.resposta_automatica_ativa,
           resposta_automatica_mensagem: formData.resposta_automatica_mensagem || null,
-        },
-        { onConflict: 'empresa_id' }
-      );
+        })
+        .eq('empresa_id', empresaId);
 
       if (error) throw error;
 
       toast({
         title: 'Configuração salva!',
-        description: 'A instância do WhatsApp foi vinculada à sua empresa.',
+        description: 'As alterações do WhatsApp foram salvas.',
         className: 'bg-emerald-600 text-white',
       });
     } catch (err) {
@@ -171,43 +170,21 @@ export default function WhatsAppConfiguracaoPage() {
   };
 
   const handleTestStatus = async () => {
-    if (!formData.instance_name || !formData.base_url) {
-      toast({
-        title: 'Preencha e salve antes de testar',
-        description: 'Informe o nome da instância e a URL do servidor.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
     setIsTestingStatus(true);
     try {
-      const { data, error } = await supabase.functions.invoke('evolution-api', {
-        body: {
-          action: 'status',
-          base_url: formData.base_url,
-          instance_name: formData.instance_name,
-        },
-      });
+      const data = await invocarInstancia('status');
+      setFormData((prev) => ({ ...prev, status: data.status }));
 
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-
-      const estadoBruto = data?.data?.instance?.state || data?.data?.state || 'desconhecido';
-      const novoStatus = estadoBruto === 'open' ? 'conectado' : 'desconectado';
-
-      setFormData((prev) => ({ ...prev, status: novoStatus }));
-
-      await supabase
-        .from('whatsapp_configuracoes')
-        .update({ status: novoStatus, last_checked_at: new Date().toISOString() })
-        .eq('empresa_id', empresaId);
-
+      const conectado = data.status === 'conectado';
       toast({
-        title: novoStatus === 'conectado' ? 'Instância conectada!' : 'Instância desconectada',
-        description: `Estado retornado pela Evolution API: ${estadoBruto}`,
-        className: novoStatus === 'conectado' ? 'bg-emerald-600 text-white' : undefined,
-        variant: novoStatus === 'conectado' ? undefined : 'destructive',
+        title: conectado
+          ? 'Instância conectada!'
+          : data.existe ? 'Instância desconectada' : 'Instância ainda não criada no servidor',
+        description: data.existe
+          ? `Estado retornado pela Evolution API: ${data.estado || 'desconhecido'}`
+          : 'Clique em "Conectar via QR Code" para criá-la e conectar.',
+        className: conectado ? 'bg-emerald-600 text-white' : undefined,
+        variant: conectado ? undefined : 'destructive',
       });
     } catch (err) {
       console.error(err);
@@ -259,28 +236,47 @@ export default function WhatsAppConfiguracaoPage() {
     toast({ title: checked ? 'Notificações ativadas!' : 'Notificações desativadas.' });
   };
 
-  const handleGerarQrCode = async () => {
-    if (!formData.instance_name || !formData.base_url) {
-      toast({
-        title: 'Preencha antes de gerar o QR Code',
-        description: 'Informe o nome da instância e a URL do servidor, e salve a configuração.',
-        variant: 'destructive',
-      });
-      return;
-    }
+  const marcarConectado = async () => {
+    pararPolling();
+    setQrCodeOpen(false);
+    setFormData((prev) => ({ ...prev, status: 'conectado' }));
+    toast({
+      title: 'WhatsApp conectado!',
+      description: 'O QR Code foi escaneado com sucesso.',
+      className: 'bg-emerald-600 text-white',
+    });
+  };
 
+  // Cria a instância da empresa se ainda não existir (sem ninguém precisar criar na mão)
+  // e abre o QR Code para conectar o número.
+  const handleGerarQrCode = async () => {
     setIsGerandoQrCode(true);
     try {
-      const { data, error } = await supabase.functions.invoke('evolution-api', {
-        body: {
-          action: 'gerarQrCode',
-          base_url: formData.base_url,
-          instance_name: formData.instance_name,
-        },
-      });
+      const data = await invocarInstancia('provisionar');
+      await fetchConfig(true); // empresa nova passa a ter a configuração salva
 
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      if (data.webhook === 'sem_segredo') {
+        toast({
+          title: 'Recebimento de mensagens não ativado',
+          description: 'A conexão foi criada, mas falta configurar o segredo do webhook no servidor (WHATSAPP_WEBHOOK_SECRET).',
+          variant: 'destructive',
+        });
+      } else if (data.webhook === 'falhou') {
+        toast({
+          title: 'Recebimento de mensagens não ativado',
+          description: 'A conexão foi criada, mas o recebimento falhou. Use "Reaplicar recebimento de mensagens" em Avançado.',
+          variant: 'destructive',
+        });
+      }
+
+      if (data.conectado) {
+        setFormData((prev) => ({ ...prev, status: 'conectado' }));
+        toast({
+          title: 'WhatsApp já está conectado',
+          className: 'bg-emerald-600 text-white',
+        });
+        return;
+      }
 
       setQrCodeBase64(data.base64);
       setQrCodePairing(data.pairingCode);
@@ -291,24 +287,8 @@ export default function WhatsAppConfiguracaoPage() {
       // Confere o status a cada 3s; se conectar, fecha o diálogo sozinho
       pollingStatusRef.current = setInterval(async () => {
         try {
-          const { data: statusData } = await supabase.functions.invoke('evolution-api', {
-            body: { action: 'status', base_url: formData.base_url, instance_name: formData.instance_name },
-          });
-          const estadoBruto = statusData?.data?.instance?.state || statusData?.data?.state;
-          if (estadoBruto === 'open') {
-            pararPolling();
-            setQrCodeOpen(false);
-            setFormData((prev) => ({ ...prev, status: 'conectado' }));
-            await supabase
-              .from('whatsapp_configuracoes')
-              .update({ status: 'conectado', last_checked_at: new Date().toISOString() })
-              .eq('empresa_id', empresaId);
-            toast({
-              title: 'WhatsApp conectado!',
-              description: 'O QR Code foi escaneado com sucesso.',
-              className: 'bg-emerald-600 text-white',
-            });
-          }
+          const statusData = await invocarInstancia('status');
+          if (statusData?.status === 'conectado') await marcarConectado();
         } catch (err) {
           console.error('Erro ao verificar status durante o QR Code:', err);
         }
@@ -317,10 +297,10 @@ export default function WhatsAppConfiguracaoPage() {
       // O QR Code da Evolution API expira rápido — renova sozinho antes de vencer
       renovacaoQrRef.current = setInterval(async () => {
         try {
-          const { data: novoQr } = await supabase.functions.invoke('evolution-api', {
-            body: { action: 'gerarQrCode', base_url: formData.base_url, instance_name: formData.instance_name },
-          });
-          if (novoQr?.base64) {
+          const novoQr = await invocarInstancia('qrcode');
+          if (novoQr?.conectado) {
+            await marcarConectado();
+          } else if (novoQr?.base64) {
             setQrCodeBase64(novoQr.base64);
             setQrCodePairing(novoQr.pairingCode);
           }
@@ -330,7 +310,7 @@ export default function WhatsAppConfiguracaoPage() {
       }, 25000);
     } catch (err) {
       toast({
-        title: 'Erro ao gerar QR Code',
+        title: 'Erro ao conectar o WhatsApp',
         description: err.message,
         variant: 'destructive',
       });
@@ -345,31 +325,9 @@ export default function WhatsAppConfiguracaoPage() {
   };
 
   const handleActivateWebhook = async () => {
-    if (!formData.instance_name || !formData.base_url) {
-      toast({
-        title: 'Preencha e salve antes de ativar',
-        description: 'Informe o nome da instância e a URL do servidor.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
     setIsActivatingWebhook(true);
     try {
-      const webhookUrl = `${SUPABASE_PROJECT_URL}/functions/v1/evolution-webhook`;
-
-      const { data, error } = await supabase.functions.invoke('evolution-api', {
-        body: {
-          action: 'setWebhook',
-          base_url: formData.base_url,
-          instance_name: formData.instance_name,
-          webhook_url: webhookUrl,
-        },
-      });
-
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-
+      await invocarInstancia('ativarWebhook');
       toast({
         title: 'Recebimento de mensagens ativado!',
         description: 'A partir de agora, mensagens recebidas vão aparecer na tela de Conversas.',
@@ -384,6 +342,24 @@ export default function WhatsAppConfiguracaoPage() {
       });
     } finally {
       setIsActivatingWebhook(false);
+    }
+  };
+
+  const handleDesconectar = async () => {
+    if (!window.confirm('Desconectar o WhatsApp desta empresa? O atendimento e os disparos ficam parados até você conectar de novo pelo QR Code.')) return;
+    setIsDesconectando(true);
+    try {
+      const data = await invocarInstancia('desconectar');
+      setFormData((prev) => ({ ...prev, status: data.status || 'desconectado' }));
+      toast({ title: 'WhatsApp desconectado.' });
+    } catch (err) {
+      toast({
+        title: 'Erro ao desconectar',
+        description: err.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDesconectando(false);
     }
   };
 
@@ -442,7 +418,7 @@ export default function WhatsAppConfiguracaoPage() {
             </div>
             <div className="flex-1">
               <h1 className="text-2xl font-bold tracking-tight text-foreground">WhatsApp - Configuração</h1>
-              <p className="text-muted-foreground text-sm">Conecte a instância da Evolution API à sua empresa.</p>
+              <p className="text-muted-foreground text-sm">Conecte o WhatsApp da sua empresa lendo um QR Code.</p>
             </div>
             <Badge className={statusBadge.className}>{statusBadge.label}</Badge>
           </div>
@@ -454,56 +430,79 @@ export default function WhatsAppConfiguracaoPage() {
           ) : (
             <>
               <form onSubmit={handleSave} className="space-y-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-lg">
-                      <Server className="w-5 h-5 text-muted-foreground" /> Servidor Evolution API
-                    </CardTitle>
-                    <CardDescription>
-                      A API Key não é solicitada aqui — ela fica protegida no servidor (Supabase Edge Function).
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="base_url">URL do servidor *</Label>
-                      <Input
-                        id="base_url"
-                        name="base_url"
-                        value={formData.base_url}
-                        onChange={handleInputChange}
-                        placeholder="https://evo.barobot.com.br"
-                        className="text-foreground bg-background font-mono"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="instance_name">Nome da instância *</Label>
-                      <Input
-                        id="instance_name"
-                        name="instance_name"
-                        value={formData.instance_name}
-                        onChange={handleInputChange}
-                        placeholder="Ex: ESTOQUE360"
-                        className="text-foreground bg-background font-mono"
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        É o nome que aparece no menu lateral do manager da Evolution API.
-                      </p>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="phone_number">Número conectado</Label>
-                      <Input
-                        id="phone_number"
-                        name="phone_number"
-                        value={formData.phone_number}
-                        onChange={handleInputChange}
-                        placeholder="5519988992192"
-                        className="text-foreground bg-background font-mono"
-                      />
-                      <p className="text-xs text-muted-foreground">Apenas informativo, não precisa ser exato.</p>
-                    </div>
-                  </CardContent>
-                </Card>
+                {!configExiste ? (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2 text-lg">
+                        <MessageCircle className="w-5 h-5 text-muted-foreground" /> Conectar o WhatsApp da empresa
+                      </CardTitle>
+                      <CardDescription>
+                        A conexão da sua empresa é criada automaticamente. Você só precisa ler um QR Code com o
+                        WhatsApp do celular que vai fazer o atendimento.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <Button type="button" onClick={handleGerarQrCode} disabled={isGerandoQrCode}>
+                        {isGerandoQrCode ? (
+                          <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Preparando...</>
+                        ) : (
+                          <><QrCode className="w-4 h-4 mr-2" /> Conectar WhatsApp</>
+                        )}
+                      </Button>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2 text-lg">
+                        <Server className="w-5 h-5 text-muted-foreground" /> Conexão
+                      </CardTitle>
+                      <CardDescription>
+                        A conexão é gerenciada automaticamente. A API Key fica protegida no servidor.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="phone_number">Número conectado</Label>
+                        <Input
+                          id="phone_number"
+                          name="phone_number"
+                          value={formData.phone_number}
+                          onChange={handleInputChange}
+                          placeholder="5519988992192"
+                          className="text-foreground bg-background font-mono"
+                        />
+                        <p className="text-xs text-muted-foreground">Apenas informativo, não precisa ser exato.</p>
+                      </div>
 
+                      <details className="rounded-md border border-border p-3">
+                        <summary className="cursor-pointer text-sm font-medium text-foreground">Avançado</summary>
+                        <div className="mt-3 space-y-3">
+                          <div className="space-y-2">
+                            <Label htmlFor="instance_name">Nome da instância</Label>
+                            <Input id="instance_name" value={formData.instance_name} readOnly className="text-foreground bg-muted font-mono" />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="base_url">Servidor</Label>
+                            <Input id="base_url" value={formData.base_url} readOnly className="text-foreground bg-muted font-mono" />
+                          </div>
+                          <Button type="button" variant="outline" onClick={handleActivateWebhook} disabled={isActivatingWebhook}>
+                            {isActivatingWebhook ? (
+                              <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Reaplicando...</>
+                            ) : (
+                              <><Radio className="w-4 h-4 mr-2" /> Reaplicar recebimento de mensagens</>
+                            )}
+                          </Button>
+                          <p className="text-xs text-muted-foreground">
+                            Use só se as mensagens recebidas pararem de aparecer em Conversas.
+                          </p>
+                        </div>
+                      </details>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {configExiste && (
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-lg">
@@ -546,6 +545,7 @@ export default function WhatsAppConfiguracaoPage() {
                     </div>
                   </CardContent>
                 </Card>
+                )}
 
                 <Card>
                   <CardHeader>
@@ -571,60 +571,46 @@ export default function WhatsAppConfiguracaoPage() {
                   </CardContent>
                 </Card>
 
-                <div className="flex flex-wrap justify-end gap-3 pb-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleGerarQrCode}
-                    disabled={isGerandoQrCode}
-                  >
-                    {isGerandoQrCode ? (
-                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Gerando...</>
-                    ) : (
-                      <><QrCode className="w-4 h-4 mr-2" /> Conectar via QR Code</>
-                    )}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleTestStatus}
-                    disabled={isTestingStatus}
-                  >
-                    {isTestingStatus ? (
-                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Testando...</>
-                    ) : (
-                      <>
-                        {formData.status === 'conectado' ? (
-                          <Wifi className="w-4 h-4 mr-2" />
+                {configExiste && (
+                  <div className="flex flex-wrap justify-end gap-3 pb-2">
+                    {formData.status === 'conectado' && (
+                      <Button type="button" variant="outline" onClick={handleDesconectar} disabled={isDesconectando}>
+                        {isDesconectando ? (
+                          <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Desconectando...</>
                         ) : (
-                          <WifiOff className="w-4 h-4 mr-2" />
+                          <><PowerOff className="w-4 h-4 mr-2" /> Desconectar</>
                         )}
-                        Testar conexão
-                      </>
+                      </Button>
                     )}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleActivateWebhook}
-                    disabled={isActivatingWebhook}
-                  >
-                    {isActivatingWebhook ? (
-                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Ativando...</>
-                    ) : (
-                      <><Radio className="w-4 h-4 mr-2" /> Ativar recebimento de mensagens</>
-                    )}
-                  </Button>
-                  <Button type="submit" disabled={isSaving} className="min-w-[150px]">
-                    {isSaving ? (
-                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Salvando...</>
-                    ) : (
-                      <><Save className="w-4 h-4 mr-2" /> Salvar Configuração</>
-                    )}
-                  </Button>
-                </div>
+                    <Button type="button" variant="outline" onClick={handleGerarQrCode} disabled={isGerandoQrCode}>
+                      {isGerandoQrCode ? (
+                        <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Gerando...</>
+                      ) : (
+                        <><QrCode className="w-4 h-4 mr-2" /> Conectar via QR Code</>
+                      )}
+                    </Button>
+                    <Button type="button" variant="outline" onClick={handleTestStatus} disabled={isTestingStatus}>
+                      {isTestingStatus ? (
+                        <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Testando...</>
+                      ) : (
+                        <>
+                          {formData.status === 'conectado' ? <Wifi className="w-4 h-4 mr-2" /> : <WifiOff className="w-4 h-4 mr-2" />}
+                          Testar conexão
+                        </>
+                      )}
+                    </Button>
+                    <Button type="submit" disabled={isSaving} className="min-w-[150px]">
+                      {isSaving ? (
+                        <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Salvando...</>
+                      ) : (
+                        <><Save className="w-4 h-4 mr-2" /> Salvar Configuração</>
+                      )}
+                    </Button>
+                  </div>
+                )}
               </form>
 
+              {configExiste && (
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2 text-lg">
@@ -668,15 +654,16 @@ export default function WhatsAppConfiguracaoPage() {
                   </form>
                 </CardContent>
               </Card>
+              )}
 
-              {formData.status !== 'conectado' && (
+              {configExiste && formData.status !== 'conectado' && (
                 <Alert variant="destructive" className="border-red-500 bg-red-50 text-red-900">
                   <AlertTitle className="font-bold flex items-center gap-2">
                     <RefreshCcw className="w-4 h-4" /> Instância não confirmada como conectada
                   </AlertTitle>
                   <AlertDescription>
-                    Salve a configuração e clique em "Testar conexão" para confirmar que a instância está ativa
-                    antes de enviar mensagens de teste.
+                    Clique em "Conectar via QR Code" para conectar o número, ou em "Testar conexão" para confirmar
+                    que a instância está ativa antes de enviar mensagens de teste.
                   </AlertDescription>
                 </Alert>
               )}
