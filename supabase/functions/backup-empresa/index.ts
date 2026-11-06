@@ -1,6 +1,17 @@
 import { corsHeaders } from "./cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 
+// Autenticação feita aqui dentro (verify_jwt=false, como o resto do projeto):
+//  - exige um usuário logado (token no header Authorization);
+//  - só administrador (perfil 'admin' / perfil admin padrão) ou super-admin;
+//  - admin comum só baixa o backup da PRÓPRIA empresa; super-admin, de qualquer uma.
+
+const falha = (message: string) =>
+  new Response(JSON.stringify({ success: false, message }), {
+    status: 400,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -11,17 +22,32 @@ Deno.serve(async (req) => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const authHeader = req.headers.get('Authorization')!;
-    if (!authHeader) throw new Error('Missing Authorization header');
+    // 1) Quem está chamando?
+    const token = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim();
+    if (!token) return falha('Não autenticado.');
+    const { data: userAuth, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !userAuth?.user) return falha('Sessão inválida. Faça login novamente.');
 
-    const { data: userAuth, error: authError } = await supabase.auth.getUser(authHeader.replace('Bearer ', ''));
-    if (authError || !userAuth?.user) throw new Error('Unauthorized');
+    const { data: caller } = await supabase
+      .from('usuarios')
+      .select('empresa_id, perfil, perfil_id, is_super_admin')
+      .eq('id', userAuth.user.id)
+      .maybeSingle();
+    if (!caller) return falha('Usuário sem cadastro na plataforma.');
 
-    const { data: userRecord } = await supabase.from('usuarios').select('perfil').eq('id', userAuth.user.id).single();
-    if (userRecord?.perfil !== 'admin') throw new Error('Forbidden');
+    const isSuper = !!caller.is_super_admin;
+    let isAdmin = caller.perfil === 'admin';
+    if (!isAdmin && caller.perfil_id) {
+      const { data: perfil } = await supabase
+        .from('perfis').select('is_admin_padrao').eq('id', caller.perfil_id).maybeSingle();
+      isAdmin = !!perfil?.is_admin_padrao;
+    }
+    if (!isSuper && !isAdmin) return falha('Apenas administradores podem gerar o backup.');
 
+    // 2) Pode ver essa empresa? (a própria, ou super-admin)
     const { empresa_id } = await req.json();
-    if (!empresa_id) throw new Error('empresa_id is required');
+    if (!empresa_id) return falha('empresa_id é obrigatório.');
+    if (!isSuper && caller.empresa_id !== empresa_id) return falha('Sem permissão para esta empresa.');
 
     const { data: empresa } = await supabase.from('empresas').select('nome').eq('id', empresa_id).single();
     const empresaNome = empresa?.nome || 'Desconhecida';
