@@ -62,13 +62,29 @@ export function AuthProvider({ children }) {
 
   const fetchUserData = useCallback(async (userId, isMounted = true) => {
     try {
-      const { data: userData, error } = await supabase
+      const buscarUsuario = () => supabase
         .from('usuarios')
         .select('*, empresas(nome)')
         .eq('id', userId)
         .maybeSingle();
 
+      let { data: userData, error } = await buscarUsuario();
       if (error) throw error;
+
+      // Cadastro feito com confirmação de e-mail: a empresa e o usuário ainda não foram
+      // criados. No primeiro login, se o cadastro trouxe o nome da empresa, completa agora.
+      if (!userData) {
+        const { data: authUser } = await supabase.auth.getUser();
+        if (authUser?.user?.id === userId && authUser.user.user_metadata?.empresa_nome) {
+          const { error: cadastroError } = await supabase.rpc('rpc_completar_cadastro');
+          if (cadastroError) {
+            console.error('[AuthContext] Falha ao completar o cadastro:', cadastroError);
+          } else {
+            ({ data: userData, error } = await buscarUsuario());
+            if (error) throw error;
+          }
+        }
+      }
 
       if (isMounted) {
         if (userData) {
@@ -200,41 +216,23 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
-  const signup = useCallback(async ({ email, password, nome, empresaId, empresaNome, isNewEmpresa }) => {
+  // O cadastro público só cria uma EMPRESA NOVA (novos usuários de uma empresa existente
+  // são criados pelo admin dela). Os nomes vão junto no cadastro (user_metadata) e a função
+  // do banco rpc_completar_cadastro cria a empresa e o primeiro usuário (admin).
+  // Com confirmação de e-mail ligada não há sessão logo após o cadastro: a conta é
+  // completada no primeiro login (veja fetchUserData).
+  const signup = useCallback(async ({ email, password, nome, empresaNome }) => {
     try {
-      const { data: authData, error: authError } = await supabase.auth.signUp({ email, password });
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { data: { nome, empresa_nome: empresaNome } },
+      });
       if (authError) throw authError;
 
-      if (authData.user) {
-        let finalEmpresaId = empresaId;
-        if (isNewEmpresa && empresaNome) {
-          const { data: newEmpresa, error: empresaError } = await supabase
-            .from('empresas')
-            .insert({ nome: empresaNome })
-            .select()
-            .single();
-          if (empresaError) throw empresaError;
-          finalEmpresaId = newEmpresa.id;
-        }
-
-        const { data: existingUser } = await supabase
-          .from('usuarios')
-          .select('id')
-          .eq('id', authData.user.id)
-          .maybeSingle();
-
-        if (!existingUser) {
-            const { error: userError } = await supabase
-              .from('usuarios')
-              .insert({
-                id: authData.user.id,
-                empresa_id: finalEmpresaId,
-                nome,
-                email,
-                perfil: 'admin',
-              });
-            if (userError) throw userError; 
-        }
+      if (authData.user && authData.session) {
+        const { error: cadastroError } = await supabase.rpc('rpc_completar_cadastro');
+        if (cadastroError) throw cadastroError;
       }
       return { data: authData, error: null };
     } catch (error) {

@@ -1,19 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/lib/customSupabaseClient';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { UserPlus, MailCheck } from 'lucide-react';
 
@@ -21,53 +12,21 @@ export default function SignupPage() {
   const [nome, setNome] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [empresaOption, setEmpresaOption] = useState('new');
   const [empresaNome, setEmpresaNome] = useState('');
-  const [selectedEmpresa, setSelectedEmpresa] = useState('');
-  const [empresas, setEmpresas] = useState([]);
   const [loading, setLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const { signup } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  useEffect(() => {
-    fetchEmpresas();
-  }, []);
-
-  const fetchEmpresas = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('empresas')
-        .select('*')
-        .order('nome');
-
-      if (error) throw error;
-      setEmpresas(data || []);
-    } catch (error) {
-      console.error('Error fetching empresas:', error);
-    }
-  };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
 
     try {
-      const isNewEmpresa = empresaOption === 'new';
-      const empresaId = isNewEmpresa ? null : selectedEmpresa;
-
-      if (!isNewEmpresa && !empresaId) {
-        toast({
-          title: 'Erro de validação',
-          description: 'Selecione uma empresa ou crie uma nova.',
-          variant: 'destructive',
-        });
-        setLoading(false);
-        return;
-      }
-
-      if (isNewEmpresa && !empresaNome.trim()) {
+      // O cadastro público só cria uma EMPRESA NOVA. Novos usuários de uma empresa
+      // existente são criados pelo admin dela, na tela de usuários.
+      if (!empresaNome.trim()) {
         toast({
           title: 'Erro de validação',
           description: 'Digite o nome da empresa.',
@@ -81,9 +40,7 @@ export default function SignupPage() {
         email,
         password,
         nome,
-        empresaId,
-        empresaNome,
-        isNewEmpresa,
+        empresaNome: empresaNome.trim(),
       });
 
       if (error) {
@@ -200,67 +157,24 @@ export default function SignupPage() {
                 />
               </div>
 
-              <div className="space-y-3">
-                <Label className="text-gray-900">Empresa</Label>
-                <RadioGroup 
-                  value={empresaOption} 
-                  onValueChange={setEmpresaOption}
+              <div className="space-y-2">
+                <Label htmlFor="empresaNome" className="text-gray-900">
+                  Nome da empresa
+                </Label>
+                <Input
+                  id="empresaNome"
+                  type="text"
+                  value={empresaNome}
+                  onChange={(e) => setEmpresaNome(e.target.value)}
+                  placeholder="Minha Empresa Ltda"
+                  required
                   disabled={loading}
-                >
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="new" id="new" />
-                    <Label htmlFor="new" className="font-normal text-gray-900">
-                      Criar nova empresa
-                    </Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="existing" id="existing" />
-                    <Label htmlFor="existing" className="font-normal text-gray-900">
-                      Entrar em empresa existente
-                    </Label>
-                  </div>
-                </RadioGroup>
+                  className="bg-white text-gray-900"
+                />
+                <p className="text-xs text-gray-500">
+                  Vai criar uma empresa nova. Para entrar numa empresa que já existe, peça ao administrador dela para criar o seu acesso.
+                </p>
               </div>
-
-              {empresaOption === 'new' ? (
-                <div className="space-y-2">
-                  <Label htmlFor="empresaNome" className="text-gray-900">
-                    Nome da empresa
-                  </Label>
-                  <Input
-                    id="empresaNome"
-                    type="text"
-                    value={empresaNome}
-                    onChange={(e) => setEmpresaNome(e.target.value)}
-                    placeholder="Minha Empresa Ltda"
-                    required={empresaOption === 'new'}
-                    disabled={loading}
-                    className="bg-white text-gray-900"
-                  />
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <Label htmlFor="empresa" className="text-gray-900">
-                    Selecione a empresa
-                  </Label>
-                  <Select 
-                    value={selectedEmpresa} 
-                    onValueChange={setSelectedEmpresa}
-                    disabled={loading}
-                  >
-                    <SelectTrigger className="bg-white text-gray-900">
-                      <SelectValue placeholder="Escolha uma empresa" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {empresas.map((empresa) => (
-                        <SelectItem key={empresa.id} value={empresa.id}>
-                          {empresa.nome}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
 
               <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? 'Criando conta...' : 'Criar conta'}
