@@ -5,9 +5,8 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
-  
+
   try {
-    // Initialize Supabase client
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_ANON_KEY') ?? '',
@@ -18,7 +17,6 @@ Deno.serve(async (req) => {
 
     if (!empresa_id) throw new Error('empresa_id ausente.');
 
-    // Fetch config for token and address validation
     const { data: config, error: configError } = await supabaseClient
       .from('configuracoes_fiscais')
       .select('*')
@@ -33,20 +31,15 @@ Deno.serve(async (req) => {
       throw new Error('Token da API Focus não configurado.');
     }
 
-    // Validate required address fields
     const requiredFields = ['logradouro', 'numero', 'bairro', 'municipio', 'uf', 'cep'];
     const missingFields = requiredFields.filter(field => !config[field]);
     if (missingFields.length > 0) {
       throw new Error(`Campos de endereço obrigatórios ausentes nas configurações fiscais: ${missingFields.join(', ')}`);
     }
 
-    // ==========================================
-    // Pre-submission Validation & Correction
-    // ==========================================
     if (payload) {
       let payloadCorrected = false;
 
-      // Ensure tipo_documento is 1
       if (payload.tipo_documento !== "1") {
         console.log(`Correção tipo_documento: de '${payload.tipo_documento}' para '1'`);
         payload.tipo_documento = "1";
@@ -57,15 +50,13 @@ Deno.serve(async (req) => {
         payload.itens.forEach((item: any, index: number) => {
           const origCsosn = item.icms_situacao_tributaria;
           const origNcm = item.codigo_ncm;
-          
-          // Check and correct CSOSN to SEFAZ-SP compliance
+
           if (origCsosn === '103') {
             item.icms_situacao_tributaria = '102';
             payloadCorrected = true;
             console.log(`[Item ${index}] Correção CSOSN: de '${origCsosn}' para '102'`);
           }
 
-          // Check and correct NCM to SEFAZ-SP compliance
           if (!origNcm || origNcm === '00000000' || origNcm.trim() === '') {
             item.codigo_ncm = '19059090';
             payloadCorrected = true;
@@ -79,10 +70,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Prepare request to Focus NFe
     const authString = btoa(`${config.token_api_focus}:`);
-    
-    // Focus NFe expects a reference (ref) for idempotency - using venda_id
     const apiUrl = `${url_api}?ref=${venda_id}`;
 
     const response = await fetch(apiUrl, {
@@ -96,15 +84,42 @@ Deno.serve(async (req) => {
 
     const result = await response.json();
 
-    // Check for Focus NFe specific errors
-    if (!response.ok || result.erros || result.codigo === 'erro_validacao') {
-       return new Response(JSON.stringify({ 
-         success: false, 
-         erro: JSON.stringify(result.erros || result.mensagem || 'Erro de validação na API Focus NFe')
-       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    // IMPORTANTE: um HTTP 200/201 da Focus NÃO significa que a nota foi
+    // autorizada pela SEFAZ — só significa que a Focus aceitou o pedido
+    // pra processar. O status real vem no campo "status" da resposta:
+    //   - "autorizado" -> sucesso de verdade
+    //   - "processando_autorizacao" -> ainda não terminou
+    //   - "erro_autorizacao"/"denegado"/"cancelado" -> rejeitado pela SEFAZ
+    // O código antigo só checava "erros"/"codigo" (erros de validação do
+    // payload antes de chegar na SEFAZ) e deixava passar como "sucesso"
+    // uma nota que a SEFAZ tinha rejeitado de verdade.
+    const statusResposta = result.status;
+    const mensagemSefaz = result.mensagem_sefaz || null;
+    const statusSefaz = result.status_sefaz || null;
+
+    const foiRejeitada = ['erro_autorizacao', 'denegado', 'cancelado', 'nao_encontrada'].includes(statusResposta);
+    const aindaProcessando = statusResposta === 'processando_autorizacao';
+
+    if (!response.ok || result.erros || result.codigo === 'erro_validacao' || foiRejeitada) {
+      const mensagemErro = mensagemSefaz
+        ? `Rejeição SEFAZ${statusSefaz ? ` ${statusSefaz}` : ''}: ${mensagemSefaz}`
+        : JSON.stringify(result.erros || result.mensagem || 'Erro de validação na API Focus NFe');
+
+      return new Response(JSON.stringify({
+        success: false,
+        erro: mensagemErro,
+        status_sefaz: statusSefaz,
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // Return success response
+    if (aindaProcessando) {
+      return new Response(JSON.stringify({
+        success: false,
+        pendente: true,
+        erro: 'A nota ainda está sendo processada pela SEFAZ. Aguarde alguns segundos e tente novamente.',
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
     return new Response(JSON.stringify({
       success: true,
       nfe_id: result.referencia || venda_id,

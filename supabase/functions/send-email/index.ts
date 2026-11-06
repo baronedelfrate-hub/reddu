@@ -1,3 +1,4 @@
+
 import { corsHeaders } from "./cors.ts";
 
 Deno.serve(async (req) => {
@@ -35,6 +36,10 @@ Deno.serve(async (req) => {
     }
 
     // Call Resend API
+    // Remetente atualizado pro domínio verificado (reddu.com.br) — o
+    // endereço de teste onboarding@resend.dev só consegue mandar pro
+    // próprio dono da conta Resend, por isso e-mail pra outros
+    // destinatários (ex: cliente) vinha com erro 403.
     const resendResponse = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
@@ -42,7 +47,7 @@ Deno.serve(async (req) => {
         'Authorization': `Bearer ${resendApiKey}`
       },
       body: JSON.stringify({
-        from: 'Estoque 360 <onboarding@resend.dev>',
+        from: 'Reddu <noreply@reddu.com.br>',
         to: Array.isArray(to) ? to : [to],
         subject: subject,
         html: html
