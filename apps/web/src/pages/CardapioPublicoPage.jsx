@@ -110,20 +110,25 @@ function SecaoCheckout({ id, titulo, estado, cor, resumo, onTrocar, bloqueadaMsg
   const ativa = estado === 'ativa';
   return (
     <div id={`sec-${id}`} className="rounded-lg overflow-hidden border" style={ativa ? { borderColor: cor, borderWidth: 2 } : { borderColor: '#e5e7eb' }}>
-      <div
-        className={`px-4 py-3 font-bold text-base ${ativa ? 'text-white' : estado === 'bloqueada' ? 'text-gray-400 bg-gray-100' : 'text-gray-800 bg-gray-100'}`}
-        style={ativa ? { backgroundColor: cor } : undefined}
-      >
-        {titulo}
-      </div>
-      {ativa && <div className="p-3 space-y-2 bg-white">{children}</div>}
-      {estado === 'concluida' && (
-        <div className="px-4 py-3 bg-white flex items-center justify-between gap-3">
-          <div className="min-w-0 text-base text-gray-800">{resumo}</div>
-          <Button type="button" variant="outline" size="sm" onClick={onTrocar} style={{ borderColor: cor, color: cor }}>Trocar</Button>
+      {estado !== 'concluida' && (
+        <div
+          className={`px-3 py-2 font-bold text-[15px] ${ativa ? 'text-white' : 'text-gray-400 bg-gray-100'}`}
+          style={ativa ? { backgroundColor: cor } : undefined}
+        >
+          {titulo}
         </div>
       )}
-      {estado === 'bloqueada' && <div className="px-4 py-3 bg-white text-sm text-gray-400 text-center">{bloqueadaMsg}</div>}
+      {ativa && <div className="p-2.5 space-y-2 bg-white">{children}</div>}
+      {estado === 'concluida' && (
+        <div className="px-3 py-2 bg-white flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{titulo}</div>
+            <div className="text-sm text-gray-800">{resumo}</div>
+          </div>
+          <Button type="button" variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={onTrocar} style={{ borderColor: cor, color: cor }}>Trocar</Button>
+        </div>
+      )}
+      {estado === 'bloqueada' && <div className="px-3 py-1.5 bg-white text-xs text-gray-400 text-center">{bloqueadaMsg}</div>}
     </div>
   );
 }
@@ -132,13 +137,13 @@ function OpcaoCheckout({ icone, titulo, subtitulo, selecionada, onClick, disable
   return (
     <button
       type="button" onClick={onClick} disabled={disabled}
-      className={`w-full flex items-center gap-3 text-left rounded-lg border px-3 py-3 ${disabled ? 'opacity-50' : 'hover:bg-gray-50'}`}
+      className={`w-full flex items-center gap-3 text-left rounded-lg border px-3 py-2 ${disabled ? 'opacity-50' : 'hover:bg-gray-50'}`}
       style={selecionada ? { borderColor: cor, backgroundColor: `${cor}0d` } : undefined}
     >
       {icone && <span className="shrink-0 text-gray-600">{icone}</span>}
       <span className="flex-1 min-w-0">
-        <span className="block font-bold text-base text-gray-900">{titulo}</span>
-        {subtitulo && <span className="block text-sm text-gray-500">{subtitulo}</span>}
+        <span className="block font-bold text-[15px] leading-snug text-gray-900">{titulo}</span>
+        {subtitulo && <span className="block text-[13px] leading-snug text-gray-500">{subtitulo}</span>}
         {extra}
       </span>
       <span className="h-5 w-5 rounded-full border-2 shrink-0 flex items-center justify-center" style={{ borderColor: selecionada ? cor : '#d1d5db' }}>
@@ -2395,11 +2400,11 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
 
       {viewAtual === 'perfil' && (
         <div className="max-w-2xl mx-auto">
-          <div className="bg-white border-b sticky top-0 z-10 flex items-center gap-2 px-4 py-3">
+          <div className="bg-white border-b sticky top-0 z-10 flex items-center gap-2 px-4 py-2.5">
             <button onClick={() => setViewAtual('inicio')} className="p-1"><ArrowLeft className="h-5 w-5 text-gray-700" /></button>
-            <h1 className="font-bold text-lg text-gray-900">Perfil da loja</h1>
+            <h1 className="font-bold text-base text-gray-900">Perfil da loja</h1>
           </div>
-          <div className="p-4 space-y-4">
+          <div className="p-3 space-y-3">
             {agendamentoAtivo && !lojaAbertaAgora && (
               <div className="bg-red-50 text-red-700 text-sm text-center py-2 px-4 rounded-lg">
                 Loja fechada agora — só aceitamos pedidos agendados.
@@ -2414,7 +2419,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                   {DIAS_SEMANA.map((nomeDia, idx) => {
                     const h = horariosConfig[idx];
                     return (
-                      <div key={idx} className="flex justify-between px-4 py-2 text-base">
+                      <div key={idx} className="flex justify-between px-4 py-2 text-sm">
                         <span className="font-medium text-gray-700">{nomeDia}</span>
                         <span className="text-gray-500">{h?.ativo ? `${h.abertura} às ${h.fechamento}` : 'Fechado'}</span>
                       </div>
@@ -2431,7 +2436,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                 </div>
                 <div className="divide-y">
                   {formasPagamentoLoja.map((forma) => (
-                    <div key={forma} className="px-4 py-2 text-base text-gray-700">{forma}</div>
+                    <div key={forma} className="px-4 py-2 text-sm text-gray-700">{forma}</div>
                   ))}
                 </div>
               </div>
@@ -2442,7 +2447,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                 <div className="bg-gray-100 px-4 py-2 flex items-center gap-2 font-bold text-gray-900">
                   <MapPin className="h-4 w-4" /> Endereço
                 </div>
-                <div className="px-4 py-3 text-base text-gray-700">{enderecoLoja}</div>
+                <div className="px-4 py-3 text-sm text-gray-700">{enderecoLoja}</div>
                 <iframe
                   title="Mapa da loja"
                   src={`https://www.google.com/maps?q=${encodeURIComponent(enderecoLoja)}&output=embed`}
@@ -2477,11 +2482,11 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
 
       {viewAtual === 'cashback' && (
         <div className="max-w-2xl mx-auto pb-24">
-          <div className="bg-white border-b sticky top-0 z-10 flex items-center gap-2 px-4 py-3">
+          <div className="bg-white border-b sticky top-0 z-10 flex items-center gap-2 px-4 py-2.5">
             <button onClick={() => setViewAtual('inicio')} className="p-1"><ArrowLeft className="h-5 w-5 text-gray-700" /></button>
-            <h1 className="font-bold text-lg text-gray-900">Meu cashback</h1>
+            <h1 className="font-bold text-base text-gray-900">Meu cashback</h1>
           </div>
-          <div className="p-4 space-y-4">
+          <div className="p-3 space-y-3">
             {!cashbackAtivo ? (
               <div className="text-center text-gray-400 py-16">O cashback não está ativo nessa loja.</div>
             ) : (
@@ -2506,7 +2511,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
 
                 <div className="bg-white border rounded-xl p-4 space-y-2">
                   <h2 className="font-bold text-gray-900">Como funciona</h2>
-                  <ul className="text-base text-gray-700 space-y-1.5 list-disc pl-5">
+                  <ul className="text-sm text-gray-700 space-y-1.5 list-disc pl-5">
                     <li>Você ganha <strong>{Number(cashbackInfo.percentual)}%</strong> do valor dos itens de volta, sem contar a taxa de entrega.</li>
                     {cashbackInfo.so_online
                       ? <li>O cashback vale para pedidos pagos <strong>online ({onlineMulti ? 'PIX ou cartão' : 'PIX'})</strong>.</li>
@@ -2529,13 +2534,13 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                         return (
                           <div key={i} className="py-2 flex items-center justify-between">
                             <div>
-                              <p className="text-base text-gray-800">{rotulo}{m.numero_pedido ? ` · pedido #${m.numero_pedido}` : ''}</p>
+                              <p className="text-sm text-gray-800">{rotulo}{m.numero_pedido ? ` · pedido #${m.numero_pedido}` : ''}</p>
                               <p className="text-xs text-gray-400">
                                 {new Date(m.created_at).toLocaleDateString('pt-BR')}
                                 {entrada && m.expira_em ? ` · vence em ${new Date(m.expira_em).toLocaleDateString('pt-BR')}` : ''}
                               </p>
                             </div>
-                            <span className={`text-base font-semibold ${entrada ? 'text-green-700' : 'text-gray-500'}`}>
+                            <span className={`text-sm font-semibold ${entrada ? 'text-green-700' : 'text-gray-500'}`}>
                               {entrada ? '+' : '-'}{formatPreco(m.valor)}
                             </span>
                           </div>
@@ -2552,11 +2557,11 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
 
       {viewAtual === 'promocoes' && (
         <div className="max-w-2xl mx-auto">
-          <div className="bg-white border-b sticky top-0 z-10 flex items-center gap-2 px-4 py-3">
+          <div className="bg-white border-b sticky top-0 z-10 flex items-center gap-2 px-4 py-2.5">
             <button onClick={() => setViewAtual('inicio')} className="p-1"><ArrowLeft className="h-5 w-5 text-gray-700" /></button>
-            <h1 className="font-bold text-lg text-gray-900">Promoções</h1>
+            <h1 className="font-bold text-base text-gray-900">Promoções</h1>
           </div>
-          <div className="p-4 space-y-3">
+          <div className="p-3 space-y-2.5">
             {promocoes.length === 0 ? (
               <div className="text-center text-gray-400 py-16">Nenhuma promoção ativa no momento.</div>
             ) : (
@@ -2564,9 +2569,9 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                 <div key={cupom.codigo} className="bg-white border-2 border-dashed rounded-xl p-4" style={{ borderColor: corCapa || '#dc2626' }}>
                   <div className="flex items-center gap-2">
                     <Tag className="h-4 w-4" style={{ color: corCapa || '#dc2626' }} />
-                    <span className="font-mono font-extrabold text-xl" style={{ color: corCapa || '#dc2626' }}>{cupom.codigo}</span>
+                    <span className="font-mono font-extrabold text-lg" style={{ color: corCapa || '#dc2626' }}>{cupom.codigo}</span>
                   </div>
-                  <p className="text-base text-gray-700 mt-1">
+                  <p className="text-sm text-gray-700 mt-1">
                     {cupom.tipo_desconto === 'percentual' ? `${cupom.valor_desconto}% de desconto` : `${formatPreco(cupom.valor_desconto)} de desconto`}
                     {cupom.valor_pedido_minimo > 0 && ` em pedidos acima de ${formatPreco(cupom.valor_pedido_minimo)}`}
                   </p>
@@ -2582,11 +2587,11 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
 
       {viewAtual === 'pedidos' && (
         <div className="max-w-2xl mx-auto">
-          <div className="bg-white border-b sticky top-0 z-10 flex items-center gap-2 px-4 py-3">
+          <div className="bg-white border-b sticky top-0 z-10 flex items-center gap-2 px-4 py-2.5">
             <button onClick={() => setViewAtual('inicio')} className="p-1"><ArrowLeft className="h-5 w-5 text-gray-700" /></button>
-            <h1 className="font-bold text-lg text-gray-900">Meus Pedidos</h1>
+            <h1 className="font-bold text-base text-gray-900">Meus Pedidos</h1>
           </div>
-          <div className="p-4 space-y-4">
+          <div className="p-3 space-y-3">
             <div className="space-y-2">
               <Input
                 value={buscaNome}
@@ -2608,9 +2613,9 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
             </div>
 
             {pedidosCliente === null ? (
-              <p className="text-base text-gray-400 text-center py-8">Digite seu nome e telefone pra consultar.</p>
+              <p className="text-sm text-gray-400 text-center py-8">Digite seu nome e telefone pra consultar.</p>
             ) : pedidosCliente.length === 0 ? (
-              <p className="text-base text-gray-400 text-center py-8">Nenhum pedido encontrado pra esse telefone.</p>
+              <p className="text-sm text-gray-400 text-center py-8">Nenhum pedido encontrado pra esse telefone.</p>
             ) : (
               <div className="space-y-3">
                 {pedidosCliente.map((pedido) => {
@@ -2642,7 +2647,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                       {!detalheAberto ? (
                         <div className="mt-2 space-y-0.5">
                           {linhas.map((linha, idx) => (
-                            <p key={idx} className="text-base text-gray-600">
+                            <p key={idx} className="text-sm text-gray-600">
                               {linha.tipo === 'simples' ? `${linha.item.quantidade}x ${linha.item.nome}` : `${linha.header.quantidade}x ${linha.header.nome}`}
                             </p>
                           ))}
@@ -2662,7 +2667,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                                         className="h-2 w-2 rounded-full mt-1.5 shrink-0"
                                         style={{ backgroundColor: cancelado ? '#ef4444' : ultimo ? (corCapa || '#dc2626') : '#d1d5db' }}
                                       />
-                                      <p className="text-base">
+                                      <p className="text-sm">
                                         <span className="text-gray-400">{formatHora(h.criado_em)}</span>{' — '}
                                         <span className={ultimo ? 'font-medium text-gray-900' : 'text-gray-500'}>
                                           {STATUS_LABEL_CLIENTE[h.status] || h.status}
@@ -2675,7 +2680,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                             </div>
                           )}
                           {linhas.map((linha, idx) => (
-                            <div key={idx} className="text-base">
+                            <div key={idx} className="text-sm">
                               {linha.tipo === 'simples' ? (
                                 <div className="flex justify-between text-gray-700">
                                   <span>{linha.item.quantidade}x {linha.item.nome}</span>
@@ -2696,7 +2701,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                               )}
                             </div>
                           ))}
-                          <div className="border-t pt-2 text-base text-gray-600 space-y-0.5">
+                          <div className="border-t pt-2 text-sm text-gray-600 space-y-0.5">
                             <p>{pedido.tipo_entrega === 'entrega' ? `Entrega: ${pedido.endereco_entrega || ''}` : 'Retirada no local'}</p>
                             {pedido.data_agendamento && <p>Agendado: {formatHora(pedido.data_agendamento)}</p>}
                             {pedido.observacao && <p>Obs: {pedido.observacao}</p>}
@@ -2961,7 +2966,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
 
           {!modoBalcao && cashbackAtivo && (
             <div
-              className="flex items-center gap-2 rounded-lg px-3 py-2 text-white text-sm"
+              className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-white text-xs"
               style={{ backgroundColor: cor, backgroundImage: 'linear-gradient(120deg, rgba(255,255,255,0.14) 0%, rgba(0,0,0,0.28) 100%)' }}
             >
               <Coins className="h-5 w-5 shrink-0" />
@@ -2977,16 +2982,16 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
           {!modoBalcao && (
             <button
               type="button" onClick={() => setMostrarItens((v) => !v)}
-              className="w-full flex items-center justify-between text-left border rounded-lg px-3 py-2 text-base"
+              className="w-full flex items-center justify-between text-left border rounded-lg px-3 py-1.5 text-sm"
             >
               <span className="font-medium">{cartCount} {cartCount === 1 ? 'item' : 'itens'} no pedido</span>
-              <span className="text-sm font-medium" style={{ color: cor }}>{mostrarItens ? 'Ocultar' : 'Ver / editar'}</span>
+              <span className="text-xs font-medium" style={{ color: cor }}>{mostrarItens ? 'Ocultar' : 'Ver / editar'}</span>
             </button>
           )}
           {(modoBalcao || mostrarItens) && (
           <div className="space-y-3 max-h-48 overflow-y-auto border rounded-lg p-2">
             {cart.map((c) => (
-              <div key={c.chave} className="text-base border-b last:border-b-0 pb-2 last:pb-0">
+              <div key={c.chave} className="text-sm border-b last:border-b-0 pb-2 last:pb-0">
                 <div className="flex justify-between items-center">
                   <span className="font-medium">
                     {c.quantidade}x {c.item.nome}
@@ -3002,14 +3007,14 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                 {c.isCombo && (c.sabores || []).length > 0 && (
                   <div className="mt-1 pl-2 space-y-0.5">
                     {c.sabores.map((s) => (
-                      <p key={s.opcaoId} className="text-sm text-gray-500">{s.quantidade}x {s.nome}</p>
+                      <p key={s.opcaoId} className="text-xs text-gray-500">{s.quantidade}x {s.nome}</p>
                     ))}
                   </div>
                 )}
                 {(c.adicionais || []).length > 0 && (
                   <div className="mt-1 pl-2 space-y-0.5">
                     {c.adicionais.map((a) => (
-                      <p key={a.opcaoId} className="text-sm text-gray-500">+ {a.nome}</p>
+                      <p key={a.opcaoId} className="text-xs text-gray-500">+ {a.nome}</p>
                     ))}
                   </div>
                 )}
@@ -3163,7 +3168,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
               <Label htmlFor="p-cupom">Cupom de desconto (opcional)</Label>
               {cupomAplicado ? (
                 <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-md px-3 py-2 mt-1">
-                  <span className="text-base text-green-700 font-medium">{cupomAplicado.codigo} · -{formatPreco(cupomAplicado.desconto)}</span>
+                  <span className="text-sm text-green-700 font-medium">{cupomAplicado.codigo} · -{formatPreco(cupomAplicado.desconto)}</span>
                   <button onClick={handleRemoverCupom} className="text-sm text-green-700 underline">Remover</button>
                 </div>
               ) : (
@@ -3543,7 +3548,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                 <Label htmlFor="p-cupom">Cupom de desconto (opcional)</Label>
                 {cupomAplicado ? (
                   <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-md px-3 py-2 mt-1">
-                    <span className="text-base text-green-700 font-medium">{cupomAplicado.codigo} · -{formatPreco(cupomAplicado.desconto)}</span>
+                    <span className="text-sm text-green-700 font-medium">{cupomAplicado.codigo} · -{formatPreco(cupomAplicado.desconto)}</span>
                     <button type="button" onClick={handleRemoverCupom} className="text-sm text-green-700 underline">Remover</button>
                   </div>
                 ) : (
@@ -3558,7 +3563,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
               {cashbackAtivo && pagOnline && cashbackSaldo > 0 && (
                 <label className="flex items-start gap-2 bg-green-50 border border-green-200 rounded-md px-3 py-2 cursor-pointer">
                   <input type="checkbox" className="mt-1" checked={usarCashback} onChange={(e) => setUsarCashback(e.target.checked)} />
-                  <span className="text-base text-green-800">
+                  <span className="text-sm text-green-800">
                     Usar meu cashback ({formatPreco(cashbackSaldo)} disponível)
                     <span className="block text-sm text-green-700">{onlineMulti ? 'Vale no pagamento online (PIX ou cartão).' : 'Vale só no pagamento com PIX.'}</span>
                   </span>
@@ -3585,7 +3590,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
           </div>
           )}
 
-          <div className="text-base space-y-1 border-t pt-2">
+          <div className="text-sm space-y-0.5 border-t pt-2">
             <div className="flex justify-between text-gray-600">
               <span>Subtotal</span><span>{formatPreco(cartTotal)}</span>
             </div>
@@ -3604,7 +3609,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                 <span>Cashback usado</span><span>-{formatPreco(cashbackUsoPrevisto)}</span>
               </div>
             )}
-            <div className="flex justify-between font-bold text-gray-900 text-lg">
+            <div className="flex justify-between font-bold text-gray-900 text-base">
               <span>Total</span><span>{formatPreco(totalAPagar)}</span>
             </div>
             {cashbackGanhoPrevisto > 0 && (
@@ -3615,9 +3620,9 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
           </div>
 
           {!modoBalcao && (
-          <DialogFooter className={RODAPE_FIXO}>
-            <Button variant="outline" onClick={() => setCheckoutOpen(false)}>Voltar</Button>
-            <Button onClick={handleSubmitPedido} disabled={submitting || gerandoPix || !todasEtapasOk}>
+          <DialogFooter className={`${RODAPE_FIXO} max-sm:!flex-row max-sm:items-center`}>
+            <Button variant="outline" className="max-sm:shrink-0" onClick={() => setCheckoutOpen(false)}>Voltar</Button>
+            <Button className="max-sm:flex-1" onClick={handleSubmitPedido} disabled={submitting || gerandoPix || !todasEtapasOk}>
               {submitting || gerandoPix
                 ? <Loader2 className="h-4 w-4 animate-spin" />
                 : !todasEtapasOk ? 'Responda as etapas acima'
