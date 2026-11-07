@@ -11,6 +11,7 @@ import { Switch } from '@/components/ui/switch';
 import { Loader2, CreditCard } from 'lucide-react';
 
 const MERCADOPAGO_WEBHOOK_URL = 'https://daptthtsvqjspavvvhax.supabase.co/functions/v1/mercadopago-webhook';
+const CIELO_LINK_WEBHOOK_URL = 'https://daptthtsvqjspavvvhax.supabase.co/functions/v1/cielo-link-webhook';
 
 // Terceira das 5 páginas que nasceram da antiga CardapioPage.jsx. Cuida só do
 // gateway de pagamento online (Cielo/Mercado Pago/InfinitePay) — a própria tabela
@@ -33,6 +34,13 @@ export default function CardapioPagamentoPage() {
   const [pagPixAtivo, setPagPixAtivo] = useState(false);
   const [pagCartaoAtivo, setPagCartaoAtivo] = useState(false);
   const [pagObrigatorio, setPagObrigatorio] = useState(false);
+  // Cielo — Link de Pagamento (Link & Checkout): outra credencial (Client ID/Secret), não a Merchant Key.
+  const [pagCieloLinkAtivo, setPagCieloLinkAtivo] = useState(false);
+  const [pagCieloClientId, setPagCieloClientId] = useState('');
+  const [pagCieloClientSecret, setPagCieloClientSecret] = useState('');
+  const [pagCieloLinkPix, setPagCieloLinkPix] = useState(true);
+  const [pagCieloLinkCartao, setPagCieloLinkCartao] = useState(true);
+  const [pagSlug, setPagSlug] = useState('');
   const [savingPagamento, setSavingPagamento] = useState(false);
 
   const ehInfinite = pagProvider === 'infinitepay';
@@ -57,7 +65,14 @@ export default function CardapioPagamentoPage() {
         setPagPixAtivo(!!data.pix_ativo);
         setPagCartaoAtivo(!!data.cartao_ativo);
         setPagObrigatorio(!!data.pagamento_obrigatorio);
+        setPagCieloLinkAtivo(!!data.cielo_link_ativo);
+        setPagCieloClientId(data.cielo_client_id || '');
+        setPagCieloClientSecret(data.cielo_client_secret || '');
+        setPagCieloLinkPix(data.cielo_link_pix !== false);
+        setPagCieloLinkCartao(data.cielo_link_cartao !== false);
       }
+      const { data: emp } = await supabase.from('empresas').select('cardapio_slug').eq('id', empresaId).maybeSingle();
+      setPagSlug(emp?.cardapio_slug || '');
     } catch (error) {
       console.error('Erro ao carregar pagamento online:', error);
       toast({ title: 'Erro ao carregar', description: error.message, variant: 'destructive' });
@@ -71,6 +86,14 @@ export default function CardapioPagamentoPage() {
   const handleSavePagamento = async () => {
     if (pagProvider === 'cielo' && (pagPixAtivo || pagCartaoAtivo) && (!pagMerchantId.trim() || !pagMerchantKey.trim())) {
       toast({ title: 'Preencha Merchant ID e Merchant Key pra ativar o pagamento online', variant: 'destructive' });
+      return;
+    }
+    if (pagProvider === 'cielo' && pagCieloLinkAtivo && (!pagCieloClientId.trim() || !pagCieloClientSecret.trim())) {
+      toast({ title: 'Preencha o Client ID e o Client Secret pra ativar o link de pagamento', description: 'Eles são gerados no site da Cielo, em Link de Pagamento > Configurações > Credenciais de API.', variant: 'destructive' });
+      return;
+    }
+    if (pagProvider === 'cielo' && pagCieloLinkAtivo && !pagCieloLinkPix && !pagCieloLinkCartao) {
+      toast({ title: 'Escolha ao menos um meio de pagamento no link', description: 'Ligue PIX e/ou cartão.', variant: 'destructive' });
       return;
     }
     if (pagProvider === 'mercadopago' && (pagPixAtivo || pagCartaoAtivo) && !pagAccessToken.trim()) {
@@ -102,6 +125,11 @@ export default function CardapioPagamentoPage() {
         public_key: pagProvider === 'mercadopago' ? (pagPublicKey.trim() || null) : null,
         cartao_max_parcelas: Math.max(1, Math.min(12, Number(pagMaxParcelas) || 1)),
         pagamento_obrigatorio: pagObrigatorio,
+        cielo_link_ativo: pagProvider === 'cielo' && pagCieloLinkAtivo,
+        cielo_client_id: pagProvider === 'cielo' ? (pagCieloClientId.trim() || null) : null,
+        cielo_client_secret: pagProvider === 'cielo' ? (pagCieloClientSecret.trim() || null) : null,
+        cielo_link_pix: pagCieloLinkPix,
+        cielo_link_cartao: pagCieloLinkCartao,
         updated_at: new Date().toISOString(),
       };
       const { data, error } = await supabase
@@ -193,6 +221,94 @@ export default function CardapioPagamentoPage() {
                 <p className="text-xs text-gray-400 mt-1">Fica protegido — só sua equipe consegue ver/editar isso, nunca aparece pro cliente.</p>
               </div>
               <p className="text-xs text-gray-400 -mt-2">A confirmação automática do pagamento já é enviada pra Cielo junto com a cobrança — não precisa configurar nada aqui.</p>
+
+              <div className="border-t pt-4 space-y-3">
+                <div className="flex items-center justify-between border rounded-lg p-3">
+                  <div>
+                    <Label className="text-gray-900">Link de pagamento da Cielo (Link &amp; Checkout)</Label>
+                    <p className="text-xs text-gray-400">O cliente paga na página segura da Cielo (PIX e/ou cartão) e volta pro cardápio. O pedido é confirmado sozinho.</p>
+                  </div>
+                  <Switch checked={pagCieloLinkAtivo} onCheckedChange={setPagCieloLinkAtivo} />
+                </div>
+
+                {pagCieloLinkAtivo && (
+                  <>
+                    <div>
+                      <Label htmlFor="pag-cielo-client-id" className="text-gray-900">Client ID</Label>
+                      <Input id="pag-cielo-client-id" value={pagCieloClientId} onChange={(e) => setPagCieloClientId(e.target.value)} placeholder="Gerado no site da Cielo" autoComplete="off" />
+                    </div>
+                    <div>
+                      <Label htmlFor="pag-cielo-client-secret" className="text-gray-900">Client Secret</Label>
+                      <Input id="pag-cielo-client-secret" type="password" value={pagCieloClientSecret} onChange={(e) => setPagCieloClientSecret(e.target.value)} placeholder="Gerado no site da Cielo" autoComplete="new-password" />
+                      <p className="text-xs text-gray-400 mt-1">
+                        No site da Cielo: <em>E-commerce → Link de Pagamento → Configurações → Credenciais de API → Gerar novas credenciais</em>.
+                        Elas aparecem uma única vez, e gerar novas invalida as anteriores. Fica protegido — só sua equipe consegue ver/editar isso, nunca aparece pro cliente.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center justify-between border rounded-lg p-3">
+                      <Label className="text-gray-900">Aceitar PIX no link</Label>
+                      <Switch checked={pagCieloLinkPix} onCheckedChange={setPagCieloLinkPix} />
+                    </div>
+                    <div className="flex items-center justify-between border rounded-lg p-3">
+                      <Label className="text-gray-900">Aceitar cartão (crédito e débito) no link</Label>
+                      <Switch checked={pagCieloLinkCartao} onCheckedChange={setPagCieloLinkCartao} />
+                    </div>
+                    {pagCieloLinkCartao && (
+                      <div>
+                        <Label htmlFor="pag-cielo-parcelas" className="text-gray-900">Parcelamento máximo</Label>
+                        <select
+                          id="pag-cielo-parcelas" value={pagMaxParcelas} onChange={(e) => setPagMaxParcelas(Number(e.target.value))}
+                          className="mt-1 w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+                        >
+                          <option value={1}>Só à vista</option>
+                          {[2, 3, 4, 5, 6, 10, 12].map((n) => <option key={n} value={n}>Até {n}x</option>)}
+                        </select>
+                      </div>
+                    )}
+
+                    <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 space-y-3">
+                      <div>
+                        <Label className="text-gray-900">Configure isto no site da Cielo (uma vez só)</Label>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          Em <em>Link de Pagamento → Configurações → Notificação de pagamentos</em>, cole o endereço abaixo em <strong>URL de Notificação</strong> e em <strong>URL de Mudança de Status</strong>. Sem isso a confirmação só acontece enquanto o cliente está com a tela aberta.
+                        </p>
+                        <div className="flex gap-2 mt-2">
+                          <Input readOnly value={CIELO_LINK_WEBHOOK_URL} className="text-xs bg-white" />
+                          <Button
+                            type="button" variant="outline" size="sm"
+                            onClick={() => { navigator.clipboard.writeText(CIELO_LINK_WEBHOOK_URL); toast({ title: 'URL copiada!' }); }}
+                          >
+                            Copiar
+                          </Button>
+                        </div>
+                      </div>
+                      {pagSlug && (
+                        <div>
+                          <p className="text-xs text-gray-500">
+                            Na mesma tela, em <strong>URL de Retorno</strong>, cole o endereço do seu cardápio, pra o cliente voltar pra ele depois de pagar:
+                          </p>
+                          <div className="flex gap-2 mt-2">
+                            <Input readOnly value={`${window.location.origin}/cardapio/${pagSlug}`} className="text-xs bg-white" />
+                            <Button
+                              type="button" variant="outline" size="sm"
+                              onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/cardapio/${pagSlug}`); toast({ title: 'URL copiada!' }); }}
+                            >
+                              Copiar
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                      <ul className="text-xs text-gray-500 list-disc pl-4 space-y-1">
+                        <li>Essas três URLs valem pra loja inteira na Cielo. Se esse estabelecimento já usa o Link de Pagamento em outro sistema, combine antes de trocar.</li>
+                        <li>Deixe a <strong>captura automática</strong> ligada na Cielo (Configurações → Captura). Cartão só autorizado não é capturado, e o pedido não fecha sozinho.</li>
+                        <li>A API do link não tem ambiente de teste. Pra testar, ligue o <strong>Modo teste</strong> na conta da Cielo e use o ambiente "Teste" acima. Nele as vendas não cobram ninguém. No modo teste o cartão com 3DS não funciona.</li>
+                        <li>Antes de abrir pros clientes, <strong>desligue o Modo teste</strong> na Cielo e mude o ambiente acima pra "Produção". Em Produção, vendas feitas em modo teste nunca são confirmadas.</li>
+                      </ul>
+                    </div>
+                  </>
+                )}
+              </div>
             </>
           )}
 
@@ -294,7 +410,7 @@ export default function CardapioPagamentoPage() {
             </div>
           )}
 
-          {(pagPixAtivo || pagCartaoAtivo) && (
+          {(pagPixAtivo || pagCartaoAtivo || (pagProvider === 'cielo' && pagCieloLinkAtivo)) && (
             <div className="flex items-center justify-between border rounded-lg p-3">
               <div>
                 <Label className="text-gray-900">Pagamento obrigatório</Label>
