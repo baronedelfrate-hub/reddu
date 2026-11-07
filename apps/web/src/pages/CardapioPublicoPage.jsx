@@ -2748,15 +2748,15 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
             return (
             <>
               {comboItemAberto.imagem_url ? (
-                <img src={comboItemAberto.imagem_url} alt={comboItemAberto.nome} className="mt-6 w-full h-44 sm:h-52 object-cover rounded-2xl shadow-sm" />
+                <img src={comboItemAberto.imagem_url} alt={comboItemAberto.nome} className="mt-6 w-full h-32 sm:h-52 object-cover rounded-2xl shadow-sm" />
               ) : fotosSabores.length >= 2 ? (
-                <div className="mt-6 grid gap-1 h-28 rounded-2xl overflow-hidden shadow-sm" style={{ gridTemplateColumns: `repeat(${fotosSabores.length}, 1fr)` }}>
+                <div className="mt-6 grid gap-1 h-24 sm:h-28 rounded-2xl overflow-hidden shadow-sm" style={{ gridTemplateColumns: `repeat(${fotosSabores.length}, 1fr)` }}>
                   {fotosSabores.map((url, i) => <img key={i} src={url} alt="" className="h-full w-full object-cover" />)}
                 </div>
               ) : null}
               <DialogHeader>
-                <DialogTitle>{comboItemAberto.nome}</DialogTitle>
-                <DialogDescription>
+                <DialogTitle className="text-base sm:text-lg leading-snug">{comboItemAberto.nome}</DialogTitle>
+                <DialogDescription className="text-[13px] leading-snug">
                   {comboItemAberto.descricao}
                   {isComboItem && (
                     comboEhMinimo(comboItemAberto)
@@ -2767,14 +2767,14 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
               </DialogHeader>
 
               {isComboItem && (
-                <div className={`text-base font-medium rounded-lg px-3 py-2 text-center ${comboAtingiuMinimo(comboItemAberto, comboTotalSelecionado)
+                <div className={`text-sm font-medium rounded-lg px-3 py-1.5 text-center ${comboAtingiuMinimo(comboItemAberto, comboTotalSelecionado)
                     ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'
                   }`}>
                   {comboEhMinimo(comboItemAberto)
                     ? `${comboTotalSelecionado} escolhidos (mínimo ${comboItemAberto.combo_quantidade_total}${comboItemAberto.quantidade_maxima ? `, máx. ${comboItemAberto.quantidade_maxima}` : ''})`
                     : `${comboTotalSelecionado} / ${comboItemAberto.combo_quantidade_total} escolhidos`}
                   {comboEhMinimo(comboItemAberto) && comboTotalSelecionado >= comboItemAberto.combo_quantidade_total && (
-                    <span className="block text-sm font-normal mt-0.5">
+                    <span className="block text-xs font-normal mt-0.5">
                       Total: {formatPreco(
                         Number(comboItemAberto.preco) * fatorPrecoCombo(comboItemAberto, comboTotalSelecionado)
                         + (saboresPorItem[comboItemAberto.id] || []).reduce(
@@ -2787,16 +2787,16 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
               )}
 
               {isComboItem && saboresDoItem.length > 0 && (
-                <p className="text-sm text-gray-500 flex items-center justify-center gap-1.5 -mb-1">
-                  <Pencil className="h-3.5 w-3.5" /> Use + e −, ou toque no número para digitar a quantidade
+                <p className="text-xs text-gray-500 flex items-center justify-center gap-1.5 -mb-1">
+                  <Pencil className="h-3 w-3 shrink-0" /> Use + e −, ou toque no número para digitar
                 </p>
               )}
 
               {isComboItem && (
                 <div className="space-y-2 max-h-80 max-sm:max-h-none overflow-y-auto max-sm:overflow-visible">
                   {saboresDoItem.map((sabor) => (
-                    <div key={sabor.id} className="flex items-center gap-3 bg-white border rounded-xl p-2.5 shadow-sm">
-                      <div className="h-12 w-12 rounded-lg bg-gray-100 flex items-center justify-center overflow-hidden shrink-0">
+                    <div key={sabor.id} className="flex items-center gap-2.5 bg-white border rounded-xl p-2 shadow-sm">
+                      <div className="h-11 w-11 rounded-lg bg-gray-100 flex items-center justify-center overflow-hidden shrink-0">
                         {sabor.imagem_url ? (
                           <img src={sabor.imagem_url} alt={sabor.nome} className="h-full w-full object-cover" />
                         ) : (
@@ -2804,17 +2804,17 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-base font-medium text-gray-900">{sabor.nome}</p>
+                        <p className="text-[15px] leading-snug font-medium text-gray-900">{sabor.nome}</p>
                         {sabor.preco_adicional > 0 && (
-                          <p className="text-sm text-gray-500">+{formatPreco(sabor.preco_adicional)} cada</p>
+                          <p className="text-xs text-gray-500">+{formatPreco(sabor.preco_adicional)} cada</p>
                         )}
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <Button variant="outline" size="icon" className="h-9 w-9 bg-white" onClick={() => ajustarSabor(sabor.id, -1)}>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <Button variant="outline" size="icon" className="h-8 w-8 bg-white" onClick={() => ajustarSabor(sabor.id, -1)}>
                           <Minus className="h-4 w-4" />
                         </Button>
-                        <QtdInput campo value={comboSelecoes[sabor.id] || 0} onCommit={(n) => definirSabor(sabor.id, n)} className="text-base" />
-                        <Button variant="outline" size="icon" className="h-9 w-9 bg-white" onClick={() => ajustarSabor(sabor.id, 1)}>
+                        <QtdInput campo value={comboSelecoes[sabor.id] || 0} onCommit={(n) => definirSabor(sabor.id, n)} className="!w-11 !h-8 text-[15px]" />
+                        <Button variant="outline" size="icon" className="h-8 w-8 bg-white" onClick={() => ajustarSabor(sabor.id, 1)}>
                           <Plus className="h-4 w-4" />
                         </Button>
                       </div>
@@ -2829,9 +2829,9 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                     const selecionados = adicionaisSelecionados[grupo.id] || [];
                     return (
                       <div key={grupo.id} className="space-y-1.5">
-                        <p className="text-base font-medium text-gray-900">
+                        <p className="text-[15px] leading-snug font-medium text-gray-900">
                           {grupo.nome}
-                          <span className="ml-1 text-sm font-normal text-gray-500">
+                          <span className="ml-1 text-xs font-normal text-gray-500">
                             {grupo.obrigatorio ? '(obrigatório' : '(opcional'}
                             {grupo.maximo ? `, máx. ${grupo.maximo}` : ''})
                           </span>
@@ -2847,9 +2847,9 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                                   checked={checked}
                                   onChange={() => toggleAdicional(grupo, opcao.id)}
                                 />
-                                <span className="flex-1 text-base text-gray-800">{opcao.nome}</span>
+                                <span className="flex-1 text-[15px] leading-snug text-gray-800">{opcao.nome}</span>
                                 {Number(opcao.preco_adicional) > 0 && (
-                                  <span className="text-sm text-gray-500">+{formatPreco(opcao.preco_adicional)}</span>
+                                  <span className="text-xs text-gray-500">+{formatPreco(opcao.preco_adicional)}</span>
                                 )}
                               </label>
                             );
@@ -2861,9 +2861,10 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                 </div>
               )}
 
-              <DialogFooter className={RODAPE_FIXO}>
-                <Button variant="outline" onClick={fecharCombo}>Cancelar</Button>
+              <DialogFooter className={`${RODAPE_FIXO} max-sm:!flex-row max-sm:items-center`}>
+                <Button variant="outline" className="max-sm:shrink-0" onClick={fecharCombo}>Cancelar</Button>
                 <Button
+                  className="max-sm:flex-1"
                   onClick={confirmarCombo}
                   disabled={
                     (isComboItem && !comboAtingiuMinimo(comboItemAberto, comboTotalSelecionado)) ||
