@@ -441,6 +441,10 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
   // pode ter mais de uma combinação de sabores diferente ao mesmo tempo.
   const [cart, setCart] = useState([]);
   const [comboItemAberto, setComboItemAberto] = useState(null);
+  // Aviso "fale com a loja": aparece quando o estoque não cobre o pedido. Nunca mostra estoque ao cliente.
+  // guarda as linhas que o cliente tentou pedir (vai na mensagem para a loja); null = aviso fechado
+  const [avisoLoja, setAvisoLoja] = useState(null);
+  const [verificandoEstoque, setVerificandoEstoque] = useState(false);
   const [comboSelecoes, setComboSelecoes] = useState({});
   const [adicionaisSelecionados, setAdicionaisSelecionados] = useState({});
 
@@ -966,8 +970,37 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
       return qtd >= grupo.minimo && (!grupo.obrigatorio || qtd >= Math.max(grupo.minimo, 1));
     });
 
-  const confirmarCombo = () => {
-    if (!comboItemAberto) return;
+  // Confere o estoque no banco ANTES de seguir. A função só diz "dá ou não dá" (nunca devolve quantidades).
+  // Se a conferência falhar por qualquer motivo, não bloqueia o cliente: o pedido ainda é conferido ao ser criado.
+  // No balcão (atendente) não se aplica: ali o erro explícito do pedido é útil.
+  const itensParaPedido = (linhas) => linhas.map((c) => ({
+    cardapio_item_id: c.item.id,
+    quantidade: c.quantidade,
+    ...(c.isCombo ? { sabores: c.sabores.map((s) => ({ opcao_id: s.opcaoId, quantidade: s.quantidade })) } : {}),
+  }));
+  const estoqueConfere = async (linhas) => {
+    if (modoBalcao || !empresa?.id || linhas.length === 0) return true;
+    try {
+      const { data, error } = await supabase.rpc('rpc_verificar_estoque_cardapio', {
+        p_empresa_id: empresa.id, p_itens: itensParaPedido(linhas), p_agendado: form.quando === 'agendar',
+      });
+      if (error) throw error;
+      return data?.ok !== false;
+    } catch (e) {
+      console.error('Erro ao conferir disponibilidade:', e);
+      return true;
+    }
+  };
+  const mensagemParaLoja = (linhasPedido) => {
+    const linhas = linhasPedido.map((c) => {
+      const sab = c.isCombo && c.sabores?.length ? ` (${c.sabores.map((sb) => `${sb.quantidade} ${sb.nome}`).join(', ')})` : '';
+      return `• ${c.quantidade}x ${c.item.nome}${sab}`;
+    });
+    return `Olá! Montei um pedido pelo cardápio digital e preciso confirmar a disponibilidade:\n${linhas.join('\n')}`.slice(0, 1500);
+  };
+
+  const confirmarCombo = async () => {
+    if (!comboItemAberto || verificandoEstoque) return;
     const isComboItem = comboItemAberto.combo_quantidade_total != null;
     if (isComboItem && !comboAtingiuMinimo(comboItemAberto, comboTotalSelecionado)) return;
     if (!gruposAdicionaisAtendidos(comboItemAberto)) return;
@@ -985,7 +1018,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
       })
       .filter(Boolean));
 
-    setCart((prev) => [...prev, {
+    const novaLinha = {
       chave: `${comboItemAberto.id}-${Date.now()}`,
       item: comboItemAberto,
       isCombo: isComboItem,
@@ -993,7 +1026,12 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
       sabores,
       adicionais,
       fatorPreco: isComboItem ? fatorPrecoCombo(comboItemAberto, comboTotalSelecionado) : 1,
-    }]);
+    };
+    setVerificandoEstoque(true);
+    const ok = await estoqueConfere([...cart, novaLinha]);
+    setVerificandoEstoque(false);
+    if (!ok) { setAvisoLoja([...cart, novaLinha]); return; } // mantém a tela aberta para a pessoa ajustar
+    setCart((prev) => [...prev, novaLinha]);
     fecharCombo();
   };
 
@@ -1610,11 +1648,16 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [calcPendente, form.enderecoRua, form.enderecoNumero]);
 
-  const handleAbrirCarrinho = () => {
+  const handleAbrirCarrinho = async () => {
     if (cartCount === 0) {
       toast({ title: 'Seu carrinho está vazio', description: 'Adicione itens do cardápio antes de finalizar.' });
       return;
     }
+    if (verificandoEstoque) return;
+    setVerificandoEstoque(true);
+    const ok = await estoqueConfere(cart);
+    setVerificandoEstoque(false);
+    if (!ok) { setAvisoLoja(cart); return; }
     setCheckoutOpen(true);
   };
 
@@ -1687,6 +1730,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
 
     setSubmitting(true);
     try {
+      if (!(await estoqueConfere(cart))) { setAvisoLoja(cart); return; }
       const { data, error } = await supabase.rpc('rpc_criar_pedido_cardapio', {
         p_empresa_id: empresa.id,
         p_cliente_nome: form.nome.trim(),
@@ -1882,6 +1926,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
       }
     } catch (error) {
       console.error('Erro ao criar pedido:', error);
+      if (!modoBalcao && /estoque/i.test(error.message || '')) { setAvisoLoja(cart); return; }
       toast({
         title: 'Não foi possível concluir o pedido',
         description: error.message?.replace(/^.*ERROR:\s*/i, '') || 'Tente novamente.',
@@ -2713,7 +2758,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
 
       {viewAtual === 'inicio' && cartCount > 0 && (
         <button
-          onClick={() => setCheckoutOpen(true)}
+          onClick={handleAbrirCarrinho}
           className="fixed bottom-16 left-4 right-4 max-w-2xl mx-auto bg-gray-900 text-white rounded-2xl px-5 py-3 shadow-lg flex items-center justify-between font-semibold text-base z-20"
         >
           <span className="flex items-center gap-2">
@@ -2892,11 +2937,12 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                   className="max-sm:flex-1"
                   onClick={confirmarCombo}
                   disabled={
+                    verificandoEstoque ||
                     (isComboItem && !comboAtingiuMinimo(comboItemAberto, comboTotalSelecionado)) ||
                     !gruposAdicionaisAtendidos(comboItemAberto)
                   }
                 >
-                  Adicionar ao carrinho
+                  {verificandoEstoque ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Adicionar ao carrinho'}
                 </Button>
               </DialogFooter>
             </>
@@ -3610,6 +3656,31 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
             <AlertDialogAction onClick={handleCancelarPedidoCliente} disabled={cancelando} className="bg-red-600 hover:bg-red-700">
               {cancelando ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Sim, cancelar'}
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!avisoLoja} onOpenChange={(abrir) => !abrir && setAvisoLoja(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Vamos finalizar com a loja</AlertDialogTitle>
+            <AlertDialogDescription>
+              Não conseguimos garantir todos os itens do seu pedido na quantidade escolhida.
+              Fale com a loja para fechar o pedido, ou ajuste as quantidades.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Ajustar pedido</AlertDialogCancel>
+            {whatsapp && (
+              <AlertDialogAction asChild className="bg-green-600 hover:bg-green-700">
+                <a
+                  href={`https://wa.me/${String(whatsapp).replace(/\D/g, '')}?text=${encodeURIComponent(mensagemParaLoja(avisoLoja || []))}`}
+                  target="_blank" rel="noopener noreferrer"
+                >
+                  <MessageCircle className="h-4 w-4 mr-2" /> Falar com a loja
+                </a>
+              </AlertDialogAction>
+            )}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
