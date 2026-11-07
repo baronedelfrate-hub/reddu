@@ -766,7 +766,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
     const esgotado = !item.ativo;
     return (
       <div key={item.id} className={`flex gap-3 p-3 ${esgotado ? 'opacity-50' : ''}`}>
-        <div className="h-20 w-20 rounded-lg bg-gray-100 flex items-center justify-center overflow-hidden shrink-0">
+        <div className="h-[84px] w-[84px] rounded-lg bg-gray-100 flex items-center justify-center overflow-hidden shrink-0">
           {item.imagem_url ? (
             <img src={item.imagem_url} alt={item.nome} className="h-full w-full object-cover" />
           ) : (
@@ -774,8 +774,8 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
           )}
         </div>
         <div className="flex-1 min-w-0">
-          <h3 className={`font-bold text-lg text-gray-900 ${esgotado ? 'line-through' : ''}`}>{item.nome}</h3>
-          {item.descricao && <p className="text-base text-gray-500 line-clamp-2 mt-0.5">{item.descricao}</p>}
+          <h3 className={`font-bold text-[15px] leading-snug text-gray-900 ${esgotado ? 'line-through' : ''}`}>{item.nome}</h3>
+          {item.descricao && <p className="text-[13px] leading-snug text-gray-500 line-clamp-3 mt-0.5">{item.descricao}</p>}
           {(item.restricoes_alimentares || []).length > 0 && (
             <div className="flex flex-wrap gap-1 mt-1">
               {item.restricoes_alimentares.map((r) => (
@@ -785,26 +785,30 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
               ))}
             </div>
           )}
-          <p className="text-lg font-extrabold mt-1" style={{ color: esgotado ? '#9ca3af' : (corCapa || '#dc2626') }}>
+          <div className="flex items-end justify-between gap-2 mt-1.5">
+          <div className="min-w-0">
+          <p className="text-base font-extrabold leading-tight" style={{ color: esgotado ? '#9ca3af' : (corCapa || '#dc2626') }}>
             {item.combo_modo === 'livre'
               ? (() => {
                 const precos = (saboresPorItem[item.id] || []).map((s) => Number(s.preco_adicional)).filter((p) => p > 0);
-                return precos.length > 0 ? `A partir de ${formatPreco(Math.min(...precos))}` : 'Monte o seu';
+                return precos.length > 0
+                  ? <><span className="block text-[11px] font-semibold text-gray-500 leading-none mb-0.5">A partir de</span>{formatPreco(Math.min(...precos))}</>
+                  : 'Monte o seu';
               })()
               : formatPreco(item.preco)}
             {isCombo && item.combo_modo !== 'livre' && (
-              <span className="text-sm font-medium text-gray-400">
+              <span className="text-xs font-medium text-gray-400 whitespace-nowrap">
                 {' '}· {item.combo_permite_acima ? `a partir de ${item.combo_quantidade_total} un` : `${item.combo_quantidade_total} un`}
               </span>
             )}
           </p>
           {cashbackAtivo && !esgotado && item.combo_modo !== 'livre' && Number(item.preco) > 0 && (
-            <span className="inline-flex items-center gap-1 mt-1 text-xs font-bold px-2 py-0.5 rounded-md bg-green-100 text-green-800">
+            <span className="inline-flex items-center gap-1 mt-1 text-[11px] font-bold px-1.5 py-0.5 rounded-md bg-green-100 text-green-800">
               <Coins className="h-3 w-3" />{Number(cashbackInfo.percentual)}% cashback
             </span>
           )}
-        </div>
-        <div className="flex items-center shrink-0">
+          </div>
+          <div className="flex items-center shrink-0">
           {esgotado ? (
             <span className="text-sm text-red-400 font-medium">Esgotado</span>
           ) : !podePedir(item) ? (
@@ -841,6 +845,8 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
               </Button>
             </div>
           )}
+          </div>
+          </div>
         </div>
       </div>
     );
@@ -2079,7 +2085,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
             <div className="h-16 w-full" style={{ backgroundColor: corCapa || '#dc2626' }} />
           )}
 
-          <header ref={headerRef} className="bg-white border-b sticky top-0 z-10">
+          <header className="bg-white">
             <div className="max-w-2xl mx-auto px-4 py-4 flex items-center gap-3">
               {empresa.logo_url ? (
                 <img src={empresa.logo_url} alt={empresa.nome} className="h-14 w-14 rounded-full object-cover border-2 border-white -mt-8 shadow" />
@@ -2089,7 +2095,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                 </div>
               )}
               <div className="flex-1 min-w-0">
-                <h1 className="text-2xl font-extrabold text-gray-900 leading-tight">{empresa.nome}</h1>
+                <h1 className="text-xl font-extrabold text-gray-900 leading-tight">{empresa.nome}</h1>
                 {(horariosConfig || lojaStatusManual) && (
                   <span
                     className={`inline-flex items-center gap-1 text-xs font-medium rounded-full px-2 py-0.5 mt-1 ${lojaAbertaAgora ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
@@ -2102,9 +2108,9 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                   </span>
                 )}
                 {descricaoLoja ? (
-                  <p className="text-base text-gray-600 mt-0.5">{descricaoLoja}</p>
+                  <p className="text-sm leading-snug text-gray-600 mt-0.5">{descricaoLoja}</p>
                 ) : mensagemTopo ? (
-                  <p className="text-base text-gray-600 mt-0.5">{mensagemTopo}</p>
+                  <p className="text-sm leading-snug text-gray-600 mt-0.5">{mensagemTopo}</p>
                 ) : null}
               </div>
               <button
@@ -2124,7 +2130,9 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                 {valorMinimoEntrega > 0 && <span className="font-bold text-gray-800">Pedido mín. {formatPreco(valorMinimoEntrega)}</span>}
               </div>
             )}
-            {!termoBusca && categorias.length > 1 && (
+          </header>
+          {!termoBusca && categorias.length > 1 && (
+            <div ref={headerRef} className="bg-white border-b sticky top-0 z-10">
               <nav
                 ref={abasRef}
                 aria-label="Categorias"
@@ -2138,7 +2146,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                       data-cat={cat.id}
                       type="button"
                       onClick={() => irParaCategoria(cat.id)}
-                      className={`shrink-0 px-3 py-2.5 text-base font-bold whitespace-nowrap border-b-[3px] transition-colors ${ativa ? '' : 'border-transparent text-gray-500'}`}
+                      className={`shrink-0 px-3 py-2.5 text-sm font-bold whitespace-nowrap border-b-[3px] transition-colors ${ativa ? '' : 'border-transparent text-gray-500'}`}
                       style={ativa ? { borderColor: corCapa || '#dc2626', color: corCapa || '#dc2626' } : undefined}
                     >
                       {cat.nome}
@@ -2146,8 +2154,9 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                   );
                 })}
               </nav>
-            )}
-          </header>
+            </div>
+          )}
+          {(termoBusca || categorias.length <= 1) && <div className="border-b" />}
 
           {agendamentoAtivo && !lojaAbertaAgora && (
             <div className="bg-red-50 text-red-700 text-base text-center py-2 px-4">
@@ -2285,7 +2294,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
 
               {categorias.map((cat) => (
                 <section key={cat.id} id={`cat-${cat.id}`}>
-                  <h2 className="text-xl font-extrabold text-gray-900 mb-2 px-1 flex items-center gap-2">
+                  <h2 className="text-lg font-extrabold text-gray-900 mb-2 px-1 flex items-center gap-2">
                     <span className="w-1.5 h-5 rounded-full" style={{ backgroundColor: corCapa || '#dc2626' }} />
                     {cat.nome}
                   </h2>
