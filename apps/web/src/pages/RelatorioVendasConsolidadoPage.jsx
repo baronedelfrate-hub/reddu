@@ -73,7 +73,7 @@ export default function RelatorioVendasConsolidadoPage() {
 
       console.log('[RELATORIO] Total de vendas carregadas do banco:', vendasRes?.length || 0);
 
-      const groupedOrders = (vendasRes || []).map(venda => {
+      const groupedOrders = (vendasRes || []).filter(venda => String(venda.status || '').trim().toUpperCase() !== 'CANCELADO').map(venda => {
         const allMovs = venda.movimentacoes || [];
         console.log(`[RELATORIO] Processando venda ${venda.id}, total movimentações: ${allMovs.length}`);
 
