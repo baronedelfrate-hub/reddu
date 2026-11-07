@@ -1066,7 +1066,8 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
   // cadastrada (motoboy volta com a maquininha), essa taxa substitui a taxa de entrega normal.
   const pagOnline = formaPagamento === 'pix' || formaPagamento === 'cartao_online' || formaPagamento === 'infinitepay' || formaPagamento === 'cielolink';
   const infinitePayAtivo = pagamentoConfigPublico.provider === 'infinitepay' && (!!pagamentoConfigPublico.pix_ativo || !!pagamentoConfigPublico.cartao_ativo);
-  const pixInternoAtivo = !!pagamentoConfigPublico.pix_ativo && pagamentoConfigPublico.provider !== 'infinitepay';
+  // Com o link da Cielo ligado, o PIX já é oferecido dentro de "Pagar online" (página da Cielo): o PIX direto some.
+  const pixInternoAtivo = !!pagamentoConfigPublico.pix_ativo && pagamentoConfigPublico.provider !== 'infinitepay' && !pagamentoConfigPublico.cielo_link_ativo;
   const cieloLinkAtivo = !!pagamentoConfigPublico.cielo_link_ativo;
   const onlineMulti = !!pagamentoConfigPublico.cartao_online || infinitePayAtivo || cieloLinkAtivo;
   const pagaNaEntrega = !pagOnline;
