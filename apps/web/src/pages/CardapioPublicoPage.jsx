@@ -18,7 +18,7 @@ import {
 import {
   Loader2, UtensilsCrossed, ImageOff, Plus, Minus, ShoppingCart, CheckCircle2, Trash2,
   Home, ClipboardList, Info, ArrowLeft, Tag, Clock, CreditCard, MapPin, Search,
-Coins, User, Smartphone, Store, CalendarDays, Zap, MessageCircle, ExternalLink, Pencil, RefreshCw } from 'lucide-react';
+Coins, User, Smartphone, Store, CalendarDays, Zap, MessageCircle, ExternalLink, Pencil, RefreshCw, X } from 'lucide-react';
 
 // Carregamento do cardápio: se uma consulta travar (rede instável), tenta de novo
 // sozinho em vez de deixar o círculo girando para sempre.
@@ -152,7 +152,7 @@ function OpcaoCheckout({ icone, titulo, subtitulo, selecionada, onClick, disable
 // a pessoa digita e só aplica ao sair do campo / apertar Enter.
 // No celular, janelas (combo/adicionais e finalizar pedido) ocupam a tela inteira, com o botão
 // de ação fixo no rodapé. No computador continuam como janela centralizada.
-const DIALOG_TELA_CHEIA = '!bg-[#eceef1] overflow-y-auto max-h-[90vh] max-sm:!left-0 max-sm:!top-0 max-sm:!translate-x-0 max-sm:!translate-y-0 max-sm:!w-screen max-sm:!max-w-none max-sm:!h-[100dvh] max-sm:!max-h-[100dvh] max-sm:!rounded-none max-sm:!border-0 max-sm:!p-4 max-sm:!flex max-sm:flex-col max-sm:[&>*]:shrink-0';
+const DIALOG_TELA_CHEIA = '[&>button:last-child]:!h-10 [&>button:last-child]:!w-10 [&>button:last-child]:!rounded-full [&>button:last-child]:!bg-white [&>button:last-child]:!opacity-100 [&>button:last-child]:!right-3 [&>button:last-child]:!top-3 [&>button:last-child]:z-30 [&>button:last-child]:flex [&>button:last-child]:items-center [&>button:last-child]:justify-center [&>button:last-child]:border [&>button:last-child]:shadow-md [&>button:last-child>svg]:!h-5 [&>button:last-child>svg]:!w-5 !bg-[#eceef1] overflow-y-auto max-h-[90vh] max-sm:!left-0 max-sm:!top-0 max-sm:!translate-x-0 max-sm:!translate-y-0 max-sm:!w-screen max-sm:!max-w-none max-sm:!h-[100dvh] max-sm:!max-h-[100dvh] max-sm:!rounded-none max-sm:!border-0 max-sm:!p-4 max-sm:!flex max-sm:flex-col max-sm:[&>*]:shrink-0';
 const RODAPE_FIXO = 'max-sm:mt-auto max-sm:sticky max-sm:bottom-0 max-sm:z-10 max-sm:bg-white max-sm:-mx-4 max-sm:-mb-4 max-sm:px-4 max-sm:py-3 max-sm:border-t max-sm:shadow-[0_-4px_12px_rgba(0,0,0,0.06)] max-sm:gap-2';
 
 // Tela do cartão de crédito (Mercado Pago). Usa o "Card Payment Brick" do Mercado Pago: os campos do
@@ -278,10 +278,19 @@ function TelaCartaoMP({ publicKey, maxParcelas, total, pedidoId, numeroPedido, a
   );
 }
 
-function QtdInput({ value, onCommit, className = '', campo = false }) {
+function QtdInput({ value, onCommit, className = '', campo = false, aoVivo = false }) {
   const [draft, setDraft] = useState(String(value));
   const [focado, setFocado] = useState(false);
-  useEffect(() => { if (!focado) setDraft(String(value)); }, [value, focado]);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!focado) { setDraft(String(value)); return; }
+    // aoVivo: se o pai ajustou o número (ex.: passou do limite do combo), mostra o valor real enquanto digita
+    if (aoVivo) {
+      const n = parseInt(draft, 10);
+      if (Number.isFinite(n) && n !== value) setDraft(String(value));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, focado, tick]);
   const aplicar = () => {
     setFocado(false);
     const n = parseInt(draft, 10);
@@ -295,7 +304,15 @@ function QtdInput({ value, onCommit, className = '', campo = false }) {
       aria-label="Quantidade"
       value={draft}
       onFocus={(e) => { setFocado(true); e.target.select(); }}
-      onChange={(e) => setDraft(e.target.value.replace(/\D/g, '').slice(0, 5))}
+      onChange={(e) => {
+        const limpo = e.target.value.replace(/\D/g, '').slice(0, 5);
+        setDraft(limpo);
+        if (aoVivo) { // aplica a cada dígito (campo vazio conta como 0, sem mexer no que está digitado)
+          const n = parseInt(limpo, 10);
+          onCommit(Number.isFinite(n) ? n : 0);
+          setTick((t) => t + 1);
+        }
+      }}
       onBlur={aplicar}
       onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
       style={campo ? undefined : { width: `${Math.max(2, draft.length + 0.6)}ch` }}
@@ -2738,7 +2755,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
 
       {/* Customizador de combo: distribuir o total entre os sabores */}
       <Dialog open={!!comboItemAberto} onOpenChange={(open) => !open && fecharCombo()}>
-        <DialogContent className={DIALOG_TELA_CHEIA}>
+        <DialogContent className={`${DIALOG_TELA_CHEIA} [&>button:last-child]:hidden`}>
           {comboItemAberto && (() => {
             const isComboItem = comboItemAberto.combo_quantidade_total != null;
             const gruposDoItem = gruposPorItem[comboItemAberto.id] || [];
@@ -2747,10 +2764,18 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
             const fotosSabores = comboItemAberto.imagem_url ? [] : saboresDoItem.map((sb) => sb.imagem_url).filter(Boolean).slice(0, 4);
             return (
             <>
+              <div className="sticky top-0 z-30 h-0 flex justify-end">
+                <button
+                  type="button" onClick={fecharCombo} aria-label="Fechar"
+                  className="mt-1 h-10 w-10 rounded-full bg-white border shadow-md flex items-center justify-center text-gray-800 active:scale-95"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
               {comboItemAberto.imagem_url ? (
-                <img src={comboItemAberto.imagem_url} alt={comboItemAberto.nome} className="mt-6 w-full h-32 sm:h-52 object-cover rounded-2xl shadow-sm" />
+                <img src={comboItemAberto.imagem_url} alt={comboItemAberto.nome} className="mt-2 w-full h-32 sm:h-52 object-cover rounded-2xl shadow-sm" />
               ) : fotosSabores.length >= 2 ? (
-                <div className="mt-6 grid gap-1 h-24 sm:h-28 rounded-2xl overflow-hidden shadow-sm" style={{ gridTemplateColumns: `repeat(${fotosSabores.length}, 1fr)` }}>
+                <div className="mt-2 grid gap-1 h-24 sm:h-28 rounded-2xl overflow-hidden shadow-sm" style={{ gridTemplateColumns: `repeat(${fotosSabores.length}, 1fr)` }}>
                   {fotosSabores.map((url, i) => <img key={i} src={url} alt="" className="h-full w-full object-cover" />)}
                 </div>
               ) : null}
@@ -2813,7 +2838,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                         <Button variant="outline" size="icon" className="h-8 w-8 bg-white" onClick={() => ajustarSabor(sabor.id, -1)}>
                           <Minus className="h-4 w-4" />
                         </Button>
-                        <QtdInput campo value={comboSelecoes[sabor.id] || 0} onCommit={(n) => definirSabor(sabor.id, n)} className="!w-11 !h-8 text-[15px]" />
+                        <QtdInput campo aoVivo value={comboSelecoes[sabor.id] || 0} onCommit={(n) => definirSabor(sabor.id, n)} className="!w-11 !h-8 text-[15px]" />
                         <Button variant="outline" size="icon" className="h-8 w-8 bg-white" onClick={() => ajustarSabor(sabor.id, 1)}>
                           <Plus className="h-4 w-4" />
                         </Button>
