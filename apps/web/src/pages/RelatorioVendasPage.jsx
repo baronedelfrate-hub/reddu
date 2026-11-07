@@ -65,7 +65,7 @@ export default function RelatorioVendasPage() {
       const nomesVendaDireta = new Set((mercadosVD || []).map(l => l.nome));
 
       let query = supabase.from('vendas').select(`
-        id, data_venda, data_baixa, financeiro_baixado, canal_venda, cliente_referencia, total_final, forma_pagamento, responsavel_retirada, observacao_retirada, numero_pedido_app, status_fiscal, nfe_url_pdf, nfe_chave,
+        id, status, data_venda, data_baixa, financeiro_baixado, canal_venda, cliente_referencia, total_final, forma_pagamento, responsavel_retirada, observacao_retirada, numero_pedido_app, status_fiscal, nfe_url_pdf, nfe_chave,
         movimentacoes!fk_movimentacoes_vendas!inner (
           id, tipo, quantidade, subtotal, desconto, taxa_motoboy, total_final, valor_unitario, observacao, observacoes, produto_id, local_origem_id, tipo_item, commercial_product_name,
           meta_quantidade, status, financeiro_baixado, data_baixa, tipo_lote, forma_pagamento, numero_pedido_app, desconto_valor, produtos ( id, nome, preco_venda ), locais:local_origem_id ( id, nome ),
@@ -87,7 +87,7 @@ export default function RelatorioVendasPage() {
       const { data: reportData, error: reportError } = await query;
       if (reportError) throw reportError;
 
-      let consolidatedList = (reportData || []).map(venda => {
+      let consolidatedList = (reportData || []).filter(venda => String(venda.status || '').trim().toUpperCase() !== 'CANCELADO').map(venda => {
         const ehMercadoVendaDireta = venda.canal_venda === 'MERCADO' && nomesVendaDireta.has(venda.cliente_referencia);
         const isPendente = !ehMercadoVendaDireta && !venda.financeiro_baixado;
         if (currentStatus === 'CONCILIADOS' && isPendente) return null;
