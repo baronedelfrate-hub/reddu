@@ -1,12 +1,8 @@
--- PENDENTE (NÃO APLICADO): passos 7b + 7d da segurança — fecha as regras abertas ao visitante.
+-- Segurança, passos 7b + 7d: fecha as regras abertas ao visitante. JÁ APLICADO em produção.
 --
--- Só aplicar DEPOIS que estiverem no ar (deploy do Vercel concluído):
---   * as telas de orçamento e lote por QR usando funções (PR #9, já mergeado);
---   * o cadastro novo que só cria empresa (PR do cadastro).
--- Aplicando antes, as versões antigas dessas telas deixam de funcionar.
---
--- Já testado numa transação desfeita (visitante, cadastro novo, admin, super admin).
--- Depois de aplicar: mover este arquivo para supabase/migrations/ com um timestamp novo.
+-- Aplicado depois do deploy das telas de orçamento e lote (funções do banco) e do
+-- cadastro que só cria empresa nova. Testado antes numa transação desfeita e
+-- conferido depois em produção como visitante, usuário comum e super admin.
 
 -- 0) Função auxiliar: o cardápio público precisa saber "essa empresa tem cardápio ativo?"
 --    sem poder ler a tabela empresas (que passa a ser fechada ao visitante).

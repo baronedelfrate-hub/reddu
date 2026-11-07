@@ -356,6 +356,29 @@ const guardarPedidoIP = (info) => {
   } catch (e) { /* sem localStorage, segue */ }
 };
 
+// Cielo (Link de Pagamento): depois de pagar, a Cielo devolve o cliente pra "URL de Retorno" da loja
+// SEM mandar dado nenhum na URL. Então lembramos, neste navegador, qual pedido ficou aguardando
+// pagamento, pra mostrar "Confirmando pagamento" quando ele voltar (vale por 1 hora).
+const chaveCieloPendente = (slug) => `cardapio_cielo_pendente_${slug}`;
+const guardarPedidoCielo = (slug, info) => {
+  try {
+    localStorage.setItem(chaveCieloPendente(slug), JSON.stringify({
+      id: info.id, numeroPedido: info.numeroPedido, total: info.total,
+      dataAgendamento: info.dataAgendamento || null, previsao: info.previsao || null, em: Date.now(),
+    }));
+  } catch (e) { /* sem localStorage, segue */ }
+};
+const lerPedidoCielo = (slug) => {
+  try {
+    const info = JSON.parse(localStorage.getItem(chaveCieloPendente(slug)) || 'null');
+    if (!info?.id || !/^[0-9a-f-]{36}$/i.test(info.id) || Date.now() - Number(info.em || 0) > 60 * 60 * 1000) return null;
+    return info;
+  } catch (e) { return null; }
+};
+const limparPedidoCielo = (slug) => {
+  try { localStorage.removeItem(chaveCieloPendente(slug)); } catch (e) { /* ignore */ }
+};
+
 export default function CardapioPublicoPage({ modoBalcao = false, slugOverride = null }) {
   const paramsRota = useParams();
   const slug = slugOverride || paramsRota.slug;
@@ -652,7 +675,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
         if (error) throw error;
         if (data) {
           setPagamentoConfigPublico(data);
-          if (data.pagamento_obrigatorio && !modoBalcao) setFormaPagamento(data.provider === 'infinitepay' && (data.pix_ativo || data.cartao_ativo) ? 'infinitepay' : (data.pix_ativo ? 'pix' : (data.cartao_online ? 'cartao_online' : 'pix')));
+          if (data.pagamento_obrigatorio && !modoBalcao) setFormaPagamento(data.cielo_link_ativo ? 'cielolink' : data.provider === 'infinitepay' && (data.pix_ativo || data.cartao_ativo) ? 'infinitepay' : (data.pix_ativo ? 'pix' : (data.cartao_online ? 'cartao_online' : 'pix')));
         }
       } catch (error) {
         console.error('Erro ao carregar config de pagamento:', error);
@@ -681,6 +704,14 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
           retorno: { transaction_nsu: params.get('transaction_nsu'), slug: params.get('slug') },
         });
         window.history.replaceState({}, '', window.location.pathname);
+      } else {
+        const pendenteCielo = lerPedidoCielo(slug);
+        if (pendenteCielo) {
+          setPagamentoAtual({
+            tipo: 'cielolink', pedidoId: pendenteCielo.id, numeroPedido: pendenteCielo.numeroPedido ?? null,
+            pedidoInfo: { id: pendenteCielo.id, numeroPedido: pendenteCielo.numeroPedido, total: pendenteCielo.total, dataAgendamento: pendenteCielo.dataAgendamento, previsao: pendenteCielo.previsao },
+          });
+        }
       }
     } catch (e) { /* sem URLSearchParams, ignora */ }
     return () => window.removeEventListener('pageshow', aoVoltar);
@@ -695,19 +726,22 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
       setVerificandoPagamento(true);
       try {
         const ehIP = pagamentoAtual.tipo === 'infinitepay';
-        const funcaoVerificar = ehIP ? 'infinitepay-verificar-pagamento' : (pagamentoConfigPublico.provider === 'mercadopago' ? 'mercadopago-verificar-pagamento' : 'cielo-verificar-pagamento');
+        const ehCielo = pagamentoAtual.tipo === 'cielolink';
+        const ehLink = ehIP || ehCielo; // pagamento na página do provedor (volta pra cá depois)
+        const funcaoVerificar = ehIP ? 'infinitepay-verificar-pagamento' : (ehCielo ? 'cielo-link-verificar' : (pagamentoConfigPublico.provider === 'mercadopago' ? 'mercadopago-verificar-pagamento' : 'cielo-verificar-pagamento'));
         const { data, error } = await supabase.functions.invoke(funcaoVerificar, {
           body: ehIP
             ? { pedido_id: pagamentoAtual.pedidoId, transaction_nsu: pagamentoAtual.retorno?.transaction_nsu || undefined, slug: pagamentoAtual.retorno?.slug || undefined }
             : { pedido_id: pagamentoAtual.pedidoId },
         });
         if (error) throw error;
-        if (ehIP && data?.status === 'pendente' && data?.url) setIpLink(data.url);
+        if (ehLink && data?.status === 'pendente' && data?.url) setIpLink(data.url);
         if (data?.status === 'pago') {
           clearInterval(intervalo);
           supabase.functions.invoke('enviar-confirmacao-pedido', { body: { pedido_id: pagamentoAtual.pedidoId } })
             .catch((e) => console.error('Erro ao notificar pedido por WhatsApp:', e));
-          setPedidoConfirmado(ehIP
+          if (ehCielo) limparPedidoCielo(slug);
+          setPedidoConfirmado(ehLink
             ? { ...pagamentoAtual.pedidoInfo, numeroPedido: data.numeroPedido ?? pagamentoAtual.pedidoInfo?.numeroPedido ?? pagamentoAtual.numeroPedido, total: data.total ?? pagamentoAtual.pedidoInfo?.total }
             : pagamentoAtual.pedidoInfo);
           setPagamentoAtual(null);
@@ -969,10 +1003,11 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
     : '';
   // Pagando na entrega: quando o cliente escolhe CARTÃO e a faixa de distância tem "taxa de retorno"
   // cadastrada (motoboy volta com a maquininha), essa taxa substitui a taxa de entrega normal.
-  const pagOnline = formaPagamento === 'pix' || formaPagamento === 'cartao_online' || formaPagamento === 'infinitepay';
+  const pagOnline = formaPagamento === 'pix' || formaPagamento === 'cartao_online' || formaPagamento === 'infinitepay' || formaPagamento === 'cielolink';
   const infinitePayAtivo = pagamentoConfigPublico.provider === 'infinitepay' && (!!pagamentoConfigPublico.pix_ativo || !!pagamentoConfigPublico.cartao_ativo);
   const pixInternoAtivo = !!pagamentoConfigPublico.pix_ativo && pagamentoConfigPublico.provider !== 'infinitepay';
-  const onlineMulti = !!pagamentoConfigPublico.cartao_online || infinitePayAtivo;
+  const cieloLinkAtivo = !!pagamentoConfigPublico.cielo_link_ativo;
+  const onlineMulti = !!pagamentoConfigPublico.cartao_online || infinitePayAtivo || cieloLinkAtivo;
   const pagaNaEntrega = !pagOnline;
   const faixaEntregaAtual = (() => {
     const tabela = empresa?.cardapio_config?.taxa_entrega?.tabela;
@@ -1288,6 +1323,26 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
     }
     setRetomandoPagamentoId(pedido.id);
     try {
+      if (cieloLinkAtivo) {
+        const { data: vd, error: ve } = await supabase.functions.invoke('cielo-link-verificar', { body: { pedido_id: pedido.id } });
+        if (ve) throw new Error(await extrairErroFuncao(ve));
+        if (vd?.status === 'pago') {
+          toast({ title: 'Esse pedido já está pago!' });
+          supabase.functions.invoke('enviar-confirmacao-pedido', { body: { pedido_id: pedido.id } })
+            .catch((e) => console.error('Erro ao notificar pedido por WhatsApp:', e));
+          handleBuscarPedidos();
+          return;
+        }
+        let urlLink = vd?.url;
+        if (!urlLink) { // pedido que ainda não chegou a ter link: cria agora
+          const { data: cd, error: ce } = await supabase.functions.invoke('cielo-link-criar', { body: { pedido_id: pedido.id } });
+          if (ce || !cd?.success || !cd?.url) throw new Error(cd?.error || (ce ? await extrairErroFuncao(ce) : null) || 'Falha ao abrir o pagamento');
+          urlLink = cd.url;
+        }
+        guardarPedidoCielo(slug, { id: pedido.id, numeroPedido: vd?.numeroPedido ?? pedido.numero_pedido, total: vd?.total ?? pedido.total });
+        window.location.href = urlLink;
+        return;
+      }
       if (pagamentoConfigPublico.provider === 'infinitepay') {
         const { data: ipData, error: ipErr } = await supabase.functions.invoke('infinitepay-verificar-pagamento', { body: { pedido_id: pedido.id } });
         if (ipErr) throw new Error(await extrairErroFuncao(ipErr));
@@ -1474,6 +1529,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
     if (tipo === 'pix') setFormaPagamento('pix');
     else if (tipo === 'cartao_online') setFormaPagamento('cartao_online');
     else if (tipo === 'infinitepay') setFormaPagamento('infinitepay');
+    else if (tipo === 'cielolink') setFormaPagamento('cielolink');
     else { setFormaPagamento('entrega'); setPagamentoEntregaTipo(tipo); }
     setPagamentoEscolhido(true); setSecaoAberta(null);
   };
@@ -1775,6 +1831,24 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
         } finally {
           if (!redirecionando) setGerandoPix(false);
         }
+      } else if (formaPagamento === 'cielolink') {
+        setGerandoPix(true);
+        let redirecionando = false;
+        try {
+          const { data: clData, error: clError } = await supabase.functions.invoke('cielo-link-criar', {
+            body: { pedido_id: data.id },
+          });
+          if (clError || !clData?.success || !clData?.url) throw new Error(clData?.error || (clError ? await extrairErroFuncao(clError) : null) || 'Falha ao abrir o pagamento');
+          guardarPedidoCielo(slug, pedidoInfo);
+          redirecionando = true;
+          window.location.href = clData.url;
+        } catch (clErr) {
+          toast({ title: 'Erro ao abrir o pagamento', description: clErr.message, variant: 'destructive' });
+          // O pedido já foi criado: mostra a confirmação normal e o cliente paga depois em "Meus Pedidos".
+          setPedidoConfirmado(pedidoInfo);
+        } finally {
+          if (!redirecionando) setGerandoPix(false);
+        }
       } else if (formaPagamento === 'cartao_online') {
         setPagamentoAtual({
           tipo: 'cartao', aguardando: false,
@@ -1824,17 +1898,17 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
     );
   }
 
-  if (gerandoPix && formaPagamento === 'infinitepay') {
+  if (gerandoPix && (formaPagamento === 'infinitepay' || formaPagamento === 'cielolink')) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-[#eceef1] text-center p-6">
         <Loader2 className="h-8 w-8 animate-spin text-gray-400 mb-4" />
         <h1 className="text-xl font-bold text-gray-900">Abrindo o pagamento seguro…</h1>
-        <p className="text-gray-500 mt-1">Você vai pagar na página da InfinitePay.</p>
+        <p className="text-gray-500 mt-1">Você vai pagar na página da {formaPagamento === 'cielolink' ? 'Cielo' : 'InfinitePay'}.</p>
       </div>
     );
   }
 
-  if (pagamentoAtual?.tipo === 'infinitepay') {
+  if (pagamentoAtual?.tipo === 'infinitepay' || pagamentoAtual?.tipo === 'cielolink') {
     const numIP = pagamentoAtual.numeroPedido ?? pagamentoAtual.pedidoInfo?.numeroPedido;
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-[#eceef1] text-center p-6">
@@ -1848,7 +1922,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
         )}
         <Button
           type="button" variant="ghost" size="sm" className="mt-4 text-gray-500"
-          onClick={() => { setPagamentoAtual(null); setViewAtual('pedidos'); handleBuscarPedidos(); }}
+          onClick={() => { limparPedidoCielo(slug); setPagamentoAtual(null); setViewAtual('pedidos'); handleBuscarPedidos(); }}
         >
           Ver meus pedidos
         </Button>
@@ -2574,7 +2648,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                           disabled={retomandoPagamentoId === pedido.id}
                           onClick={() => handleRetomarPagamento(pedido)}
                         >
-                          {retomandoPagamentoId === pedido.id ? <Loader2 className="h-4 w-4 animate-spin" /> : pagamentoConfigPublico.provider === 'infinitepay' ? 'Pagar agora' : 'Pagar agora (PIX)'}
+                          {retomandoPagamentoId === pedido.id ? <Loader2 className="h-4 w-4 animate-spin" /> : (pagamentoConfigPublico.provider === 'infinitepay' || cieloLinkAtivo) ? 'Pagar agora' : 'Pagar agora (PIX)'}
                         </Button>
                       )}
 
@@ -3304,7 +3378,9 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
               id="pagamento" titulo={`${numSecao('pagamento')}. Forma de pagamento`} estado={estadoSecao('pagamento')} cor={cor}
               bloqueadaMsg="Escolha como receber para continuar"
               onTrocar={() => setSecaoAberta('pagamento')}
-              resumo={formaPagamento === 'infinitepay'
+              resumo={formaPagamento === 'cielolink'
+                ? <><p className="font-bold">Pagar online</p><p className="text-sm text-gray-500">PIX ou cartão, na página segura da Cielo</p></>
+                : formaPagamento === 'infinitepay'
                 ? <><p className="font-bold">Pagar online</p><p className="text-sm text-gray-500">PIX ou cartão, na página segura da InfinitePay</p></>
                 : formaPagamento === 'cartao_online'
                 ? <><p className="font-bold">Cartão de crédito</p><p className="text-sm text-gray-500">Pague agora, direto no app</p></>
@@ -3312,6 +3388,18 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                 ? <><p className="font-bold">PIX</p><p className="text-sm text-gray-500">Pague agora, já deixa pago</p></>
                 : <><p className="font-bold">{pagamentoEntregaTipo === 'cartao' ? 'Cartão (maquininha)' : 'Dinheiro'}</p><p className="text-sm text-gray-500">Pagamento na {form.tipo_entrega === 'entrega' ? 'entrega' : 'retirada'}</p></>}
             >
+              {cieloLinkAtivo && (
+                <OpcaoCheckout
+                  cor={cor} icone={<Zap className="h-5 w-5" />} titulo="Pagar online" subtitulo="Pague agora, na página segura da Cielo"
+                  selecionada={pagamentoEscolhido && formaPagamento === 'cielolink'}
+                  onClick={() => escolherPagamento('cielolink')}
+                  extra={cashbackAtivo ? (
+                    <span className="inline-flex items-center gap-1 mt-1 text-xs font-bold px-2 py-0.5 rounded-md bg-green-100 text-green-800">
+                      <Coins className="h-3 w-3" />{Number(cashbackInfo.percentual)}% de cashback
+                    </span>
+                  ) : null}
+                />
+              )}
               {infinitePayAtivo && (
                 <OpcaoCheckout
                   cor={cor} icone={<Zap className="h-5 w-5" />} titulo="Pagar online" subtitulo="PIX ou cartão, pague agora"
@@ -3348,7 +3436,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                   ) : null}
                 />
               )}
-              {(!pagamentoConfigPublico.pagamento_obrigatorio || (!pixInternoAtivo && !pagamentoConfigPublico.cartao_online && !infinitePayAtivo)) && (
+              {(!pagamentoConfigPublico.pagamento_obrigatorio || (!pixInternoAtivo && !pagamentoConfigPublico.cartao_online && !infinitePayAtivo && !cieloLinkAtivo)) && (
                 <>
                   <OpcaoCheckout
                     cor={cor} icone={<CreditCard className="h-5 w-5" />} titulo="Dinheiro" subtitulo={`Pagar na ${form.tipo_entrega === 'entrega' ? 'entrega' : 'retirada'}`}
@@ -3451,7 +3539,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
               {submitting || gerandoPix
                 ? <Loader2 className="h-4 w-4 animate-spin" />
                 : !todasEtapasOk ? 'Responda as etapas acima'
-                  : formaPagamento === 'infinitepay' ? `Pagar online · ${formatPreco(totalAPagar)}`
+                  : (formaPagamento === 'infinitepay' || formaPagamento === 'cielolink') ? `Pagar online · ${formatPreco(totalAPagar)}`
                   : formaPagamento === 'pix' ? `Gerar PIX · ${formatPreco(totalAPagar)}`
                     : formaPagamento === 'cartao_online' ? `Pagar com cartão · ${formatPreco(totalAPagar)}`
                     : `Confirmar pedido · ${formatPreco(totalAPagar)}`}
