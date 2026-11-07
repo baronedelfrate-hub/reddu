@@ -18,7 +18,7 @@ import {
 import {
   Loader2, UtensilsCrossed, ImageOff, Plus, Minus, ShoppingCart, CheckCircle2, Trash2,
   Home, ClipboardList, Info, ArrowLeft, Tag, Clock, CreditCard, MapPin, Search,
-Coins, User, Smartphone, Store, CalendarDays, Zap, MessageCircle, ExternalLink, Pencil, RefreshCw } from 'lucide-react';
+Coins, User, Smartphone, Store, CalendarDays, Zap, MessageCircle, ExternalLink, Pencil, RefreshCw, X } from 'lucide-react';
 
 // Carregamento do cardápio: se uma consulta travar (rede instável), tenta de novo
 // sozinho em vez de deixar o círculo girando para sempre.
@@ -152,7 +152,7 @@ function OpcaoCheckout({ icone, titulo, subtitulo, selecionada, onClick, disable
 // a pessoa digita e só aplica ao sair do campo / apertar Enter.
 // No celular, janelas (combo/adicionais e finalizar pedido) ocupam a tela inteira, com o botão
 // de ação fixo no rodapé. No computador continuam como janela centralizada.
-const DIALOG_TELA_CHEIA = '!bg-[#eceef1] overflow-y-auto max-h-[90vh] max-sm:!left-0 max-sm:!top-0 max-sm:!translate-x-0 max-sm:!translate-y-0 max-sm:!w-screen max-sm:!max-w-none max-sm:!h-[100dvh] max-sm:!max-h-[100dvh] max-sm:!rounded-none max-sm:!border-0 max-sm:!p-4 max-sm:!flex max-sm:flex-col max-sm:[&>*]:shrink-0';
+const DIALOG_TELA_CHEIA = '[&>button:last-child]:!h-10 [&>button:last-child]:!w-10 [&>button:last-child]:!rounded-full [&>button:last-child]:!bg-white [&>button:last-child]:!opacity-100 [&>button:last-child]:!right-3 [&>button:last-child]:!top-3 [&>button:last-child]:z-30 [&>button:last-child]:flex [&>button:last-child]:items-center [&>button:last-child]:justify-center [&>button:last-child]:border [&>button:last-child]:shadow-md [&>button:last-child>svg]:!h-5 [&>button:last-child>svg]:!w-5 !bg-[#eceef1] overflow-y-auto max-h-[90vh] max-sm:!left-0 max-sm:!top-0 max-sm:!translate-x-0 max-sm:!translate-y-0 max-sm:!w-screen max-sm:!max-w-none max-sm:!h-[100dvh] max-sm:!max-h-[100dvh] max-sm:!rounded-none max-sm:!border-0 max-sm:!p-4 max-sm:!flex max-sm:flex-col max-sm:[&>*]:shrink-0';
 const RODAPE_FIXO = 'max-sm:mt-auto max-sm:sticky max-sm:bottom-0 max-sm:z-10 max-sm:bg-white max-sm:-mx-4 max-sm:-mb-4 max-sm:px-4 max-sm:py-3 max-sm:border-t max-sm:shadow-[0_-4px_12px_rgba(0,0,0,0.06)] max-sm:gap-2';
 
 // Tela do cartão de crédito (Mercado Pago). Usa o "Card Payment Brick" do Mercado Pago: os campos do
@@ -278,10 +278,19 @@ function TelaCartaoMP({ publicKey, maxParcelas, total, pedidoId, numeroPedido, a
   );
 }
 
-function QtdInput({ value, onCommit, className = '', campo = false }) {
+function QtdInput({ value, onCommit, className = '', campo = false, aoVivo = false }) {
   const [draft, setDraft] = useState(String(value));
   const [focado, setFocado] = useState(false);
-  useEffect(() => { if (!focado) setDraft(String(value)); }, [value, focado]);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!focado) { setDraft(String(value)); return; }
+    // aoVivo: se o pai ajustou o número (ex.: passou do limite do combo), mostra o valor real enquanto digita
+    if (aoVivo) {
+      const n = parseInt(draft, 10);
+      if (Number.isFinite(n) && n !== value) setDraft(String(value));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, focado, tick]);
   const aplicar = () => {
     setFocado(false);
     const n = parseInt(draft, 10);
@@ -295,7 +304,15 @@ function QtdInput({ value, onCommit, className = '', campo = false }) {
       aria-label="Quantidade"
       value={draft}
       onFocus={(e) => { setFocado(true); e.target.select(); }}
-      onChange={(e) => setDraft(e.target.value.replace(/\D/g, '').slice(0, 5))}
+      onChange={(e) => {
+        const limpo = e.target.value.replace(/\D/g, '').slice(0, 5);
+        setDraft(limpo);
+        if (aoVivo) { // aplica a cada dígito (campo vazio conta como 0, sem mexer no que está digitado)
+          const n = parseInt(limpo, 10);
+          onCommit(Number.isFinite(n) ? n : 0);
+          setTick((t) => t + 1);
+        }
+      }}
       onBlur={aplicar}
       onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
       style={campo ? undefined : { width: `${Math.max(2, draft.length + 0.6)}ch` }}
@@ -424,6 +441,10 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
   // pode ter mais de uma combinação de sabores diferente ao mesmo tempo.
   const [cart, setCart] = useState([]);
   const [comboItemAberto, setComboItemAberto] = useState(null);
+  // Aviso "fale com a loja": aparece quando o estoque não cobre o pedido. Nunca mostra estoque ao cliente.
+  // guarda as linhas que o cliente tentou pedir (vai na mensagem para a loja); null = aviso fechado
+  const [avisoLoja, setAvisoLoja] = useState(null);
+  const [verificandoEstoque, setVerificandoEstoque] = useState(false);
   const [comboSelecoes, setComboSelecoes] = useState({});
   const [adicionaisSelecionados, setAdicionaisSelecionados] = useState({});
 
@@ -949,8 +970,37 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
       return qtd >= grupo.minimo && (!grupo.obrigatorio || qtd >= Math.max(grupo.minimo, 1));
     });
 
-  const confirmarCombo = () => {
-    if (!comboItemAberto) return;
+  // Confere o estoque no banco ANTES de seguir. A função só diz "dá ou não dá" (nunca devolve quantidades).
+  // Se a conferência falhar por qualquer motivo, não bloqueia o cliente: o pedido ainda é conferido ao ser criado.
+  // No balcão (atendente) não se aplica: ali o erro explícito do pedido é útil.
+  const itensParaPedido = (linhas) => linhas.map((c) => ({
+    cardapio_item_id: c.item.id,
+    quantidade: c.quantidade,
+    ...(c.isCombo ? { sabores: c.sabores.map((s) => ({ opcao_id: s.opcaoId, quantidade: s.quantidade })) } : {}),
+  }));
+  const estoqueConfere = async (linhas) => {
+    if (modoBalcao || !empresa?.id || linhas.length === 0) return true;
+    try {
+      const { data, error } = await supabase.rpc('rpc_verificar_estoque_cardapio', {
+        p_empresa_id: empresa.id, p_itens: itensParaPedido(linhas), p_agendado: form.quando === 'agendar',
+      });
+      if (error) throw error;
+      return data?.ok !== false;
+    } catch (e) {
+      console.error('Erro ao conferir disponibilidade:', e);
+      return true;
+    }
+  };
+  const mensagemParaLoja = (linhasPedido) => {
+    const linhas = linhasPedido.map((c) => {
+      const sab = c.isCombo && c.sabores?.length ? ` (${c.sabores.map((sb) => `${sb.quantidade} ${sb.nome}`).join(', ')})` : '';
+      return `• ${c.quantidade}x ${c.item.nome}${sab}`;
+    });
+    return `Olá! Montei um pedido pelo cardápio digital e preciso confirmar a disponibilidade:\n${linhas.join('\n')}`.slice(0, 1500);
+  };
+
+  const confirmarCombo = async () => {
+    if (!comboItemAberto || verificandoEstoque) return;
     const isComboItem = comboItemAberto.combo_quantidade_total != null;
     if (isComboItem && !comboAtingiuMinimo(comboItemAberto, comboTotalSelecionado)) return;
     if (!gruposAdicionaisAtendidos(comboItemAberto)) return;
@@ -968,7 +1018,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
       })
       .filter(Boolean));
 
-    setCart((prev) => [...prev, {
+    const novaLinha = {
       chave: `${comboItemAberto.id}-${Date.now()}`,
       item: comboItemAberto,
       isCombo: isComboItem,
@@ -976,7 +1026,12 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
       sabores,
       adicionais,
       fatorPreco: isComboItem ? fatorPrecoCombo(comboItemAberto, comboTotalSelecionado) : 1,
-    }]);
+    };
+    setVerificandoEstoque(true);
+    const ok = await estoqueConfere([...cart, novaLinha]);
+    setVerificandoEstoque(false);
+    if (!ok) { setAvisoLoja([...cart, novaLinha]); return; } // mantém a tela aberta para a pessoa ajustar
+    setCart((prev) => [...prev, novaLinha]);
     fecharCombo();
   };
 
@@ -1593,11 +1648,16 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [calcPendente, form.enderecoRua, form.enderecoNumero]);
 
-  const handleAbrirCarrinho = () => {
+  const handleAbrirCarrinho = async () => {
     if (cartCount === 0) {
       toast({ title: 'Seu carrinho está vazio', description: 'Adicione itens do cardápio antes de finalizar.' });
       return;
     }
+    if (verificandoEstoque) return;
+    setVerificandoEstoque(true);
+    const ok = await estoqueConfere(cart);
+    setVerificandoEstoque(false);
+    if (!ok) { setAvisoLoja(cart); return; }
     setCheckoutOpen(true);
   };
 
@@ -1670,6 +1730,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
 
     setSubmitting(true);
     try {
+      if (!(await estoqueConfere(cart))) { setAvisoLoja(cart); return; }
       const { data, error } = await supabase.rpc('rpc_criar_pedido_cardapio', {
         p_empresa_id: empresa.id,
         p_cliente_nome: form.nome.trim(),
@@ -1865,6 +1926,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
       }
     } catch (error) {
       console.error('Erro ao criar pedido:', error);
+      if (!modoBalcao && /estoque/i.test(error.message || '')) { setAvisoLoja(cart); return; }
       toast({
         title: 'Não foi possível concluir o pedido',
         description: error.message?.replace(/^.*ERROR:\s*/i, '') || 'Tente novamente.',
@@ -2696,7 +2758,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
 
       {viewAtual === 'inicio' && cartCount > 0 && (
         <button
-          onClick={() => setCheckoutOpen(true)}
+          onClick={handleAbrirCarrinho}
           className="fixed bottom-16 left-4 right-4 max-w-2xl mx-auto bg-gray-900 text-white rounded-2xl px-5 py-3 shadow-lg flex items-center justify-between font-semibold text-base z-20"
         >
           <span className="flex items-center gap-2">
@@ -2738,7 +2800,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
 
       {/* Customizador de combo: distribuir o total entre os sabores */}
       <Dialog open={!!comboItemAberto} onOpenChange={(open) => !open && fecharCombo()}>
-        <DialogContent className={DIALOG_TELA_CHEIA}>
+        <DialogContent className={`${DIALOG_TELA_CHEIA} [&>button:last-child]:hidden`}>
           {comboItemAberto && (() => {
             const isComboItem = comboItemAberto.combo_quantidade_total != null;
             const gruposDoItem = gruposPorItem[comboItemAberto.id] || [];
@@ -2747,10 +2809,18 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
             const fotosSabores = comboItemAberto.imagem_url ? [] : saboresDoItem.map((sb) => sb.imagem_url).filter(Boolean).slice(0, 4);
             return (
             <>
+              <div className="sticky top-0 z-30 h-0 flex justify-end">
+                <button
+                  type="button" onClick={fecharCombo} aria-label="Fechar"
+                  className="mt-1 h-10 w-10 rounded-full bg-white border shadow-md flex items-center justify-center text-gray-800 active:scale-95"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
               {comboItemAberto.imagem_url ? (
-                <img src={comboItemAberto.imagem_url} alt={comboItemAberto.nome} className="mt-6 w-full h-32 sm:h-52 object-cover rounded-2xl shadow-sm" />
+                <img src={comboItemAberto.imagem_url} alt={comboItemAberto.nome} className="mt-2 w-full h-32 sm:h-52 object-cover rounded-2xl shadow-sm" />
               ) : fotosSabores.length >= 2 ? (
-                <div className="mt-6 grid gap-1 h-24 sm:h-28 rounded-2xl overflow-hidden shadow-sm" style={{ gridTemplateColumns: `repeat(${fotosSabores.length}, 1fr)` }}>
+                <div className="mt-2 grid gap-1 h-24 sm:h-28 rounded-2xl overflow-hidden shadow-sm" style={{ gridTemplateColumns: `repeat(${fotosSabores.length}, 1fr)` }}>
                   {fotosSabores.map((url, i) => <img key={i} src={url} alt="" className="h-full w-full object-cover" />)}
                 </div>
               ) : null}
@@ -2813,7 +2883,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                         <Button variant="outline" size="icon" className="h-8 w-8 bg-white" onClick={() => ajustarSabor(sabor.id, -1)}>
                           <Minus className="h-4 w-4" />
                         </Button>
-                        <QtdInput campo value={comboSelecoes[sabor.id] || 0} onCommit={(n) => definirSabor(sabor.id, n)} className="!w-11 !h-8 text-[15px]" />
+                        <QtdInput campo aoVivo value={comboSelecoes[sabor.id] || 0} onCommit={(n) => definirSabor(sabor.id, n)} className="!w-11 !h-8 text-[15px]" />
                         <Button variant="outline" size="icon" className="h-8 w-8 bg-white" onClick={() => ajustarSabor(sabor.id, 1)}>
                           <Plus className="h-4 w-4" />
                         </Button>
@@ -2867,11 +2937,12 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                   className="max-sm:flex-1"
                   onClick={confirmarCombo}
                   disabled={
+                    verificandoEstoque ||
                     (isComboItem && !comboAtingiuMinimo(comboItemAberto, comboTotalSelecionado)) ||
                     !gruposAdicionaisAtendidos(comboItemAberto)
                   }
                 >
-                  Adicionar ao carrinho
+                  {verificandoEstoque ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Adicionar ao carrinho'}
                 </Button>
               </DialogFooter>
             </>
@@ -3585,6 +3656,31 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
             <AlertDialogAction onClick={handleCancelarPedidoCliente} disabled={cancelando} className="bg-red-600 hover:bg-red-700">
               {cancelando ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Sim, cancelar'}
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!avisoLoja} onOpenChange={(abrir) => !abrir && setAvisoLoja(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Vamos finalizar com a loja</AlertDialogTitle>
+            <AlertDialogDescription>
+              Não conseguimos garantir todos os itens do seu pedido na quantidade escolhida.
+              Fale com a loja para fechar o pedido, ou ajuste as quantidades.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Ajustar pedido</AlertDialogCancel>
+            {whatsapp && (
+              <AlertDialogAction asChild className="bg-green-600 hover:bg-green-700">
+                <a
+                  href={`https://wa.me/${String(whatsapp).replace(/\D/g, '')}?text=${encodeURIComponent(mensagemParaLoja(avisoLoja || []))}`}
+                  target="_blank" rel="noopener noreferrer"
+                >
+                  <MessageCircle className="h-4 w-4 mr-2" /> Falar com a loja
+                </a>
+              </AlertDialogAction>
+            )}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
