@@ -105,6 +105,164 @@ function IconeRede({ tipo }) {
   );
 }
 
+// Escolha de data e hora do agendamento: dias em botões + horário digitado (ou toque num horário sugerido).
+// Entrega o valor no mesmo formato do <input type="datetime-local"> ("AAAA-MM-DDTHH:mm", hora local),
+// então o resto do pedido (validação, RPC, resumo) continua igual.
+const DIAS_CURTOS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const MESES_CURTOS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+const pad2 = (n) => String(n).padStart(2, '0');
+const chaveDia = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+function normalizarHora(txt) {
+  const dig = String(txt || '').replace(/\D/g, '').slice(0, 4);
+  if (!dig) return null;
+  let h; let m;
+  if (dig.length <= 2) { h = Number(dig); m = 0; }
+  else if (dig.length === 3) { h = Number(dig.slice(0, 1)); m = Number(dig.slice(1)); }
+  else { h = Number(dig.slice(0, 2)); m = Number(dig.slice(2)); }
+  if (h > 23 || m > 59) return null;
+  return `${pad2(h)}:${pad2(m)}`;
+}
+function SeletorAgendamento({ value, onChange, horariosConfig, minData, cor, id }) {
+  const [valorDia, valorHora] = String(value || '').split('T');
+  const [dia, setDia] = useState(valorDia || '');
+  const [texto, setTexto] = useState(valorHora || '');
+  const [erro, setErro] = useState('');
+
+  const minHHMM = `${pad2(minData.getHours())}:${pad2(minData.getMinutes())}`;
+  const chaveMin = chaveDia(minData);
+  const janelaDoDia = (d) => {
+    if (!horariosConfig) return { ativo: true, abertura: '00:00', fechamento: '23:59' };
+    const h = horariosConfig[d.getDay()];
+    return h && h.ativo ? { ativo: true, abertura: h.abertura, fechamento: h.fechamento } : { ativo: false };
+  };
+  const dias = useMemo(() => {
+    const hoje = new Date(); hoje.setHours(12, 0, 0, 0);
+    const lista = [];
+    for (let i = 0; i < 30 && lista.length < 14; i++) {
+      const d = new Date(hoje.getTime() + i * 86400000);
+      const chave = chaveDia(d);
+      if (chave < chaveMin) continue;
+      const j = janelaDoDia(d);
+      const fechamentoEfetivo = j.ativo ? j.fechamento : null;
+      const semHorario = !j.ativo || (chave === chaveMin && fechamentoEfetivo < minHHMM);
+      if (semHorario) continue; // dia em que a loja não abre (ou já passou do horário) nem aparece
+      lista.push({ d, chave, j, semHorario, rotulo: chave === chaveDia(new Date()) ? 'Hoje' : (chave === chaveDia(new Date(Date.now() + 86400000)) ? 'Amanhã' : DIAS_CURTOS[d.getDay()]) });
+    }
+    return lista;
+  }, [horariosConfig, chaveMin, minHHMM]);
+
+  const diaAtual = dias.find((x) => x.chave === dia) || null;
+  const janela = diaAtual?.j || null;
+  const inicioMin = (diaAtual && diaAtual.chave === chaveMin && minHHMM > janela.abertura) ? minHHMM : janela?.abertura;
+
+  const sugestoes = useMemo(() => {
+    if (!diaAtual || !janela?.ativo) return [];
+    const ini = horariosConfig ? janela.abertura : '08:00';
+    const fim = horariosConfig ? janela.fechamento : '22:00';
+    const out = [];
+    let [h, m] = ini.split(':').map(Number);
+    for (let guard = 0; guard < 60; guard++) {
+      const hhmm = `${pad2(h)}:${pad2(m)}`;
+      if (hhmm > fim) break;
+      if (!(diaAtual.chave === chaveMin && hhmm < minHHMM)) out.push(hhmm);
+      m += 30; if (m >= 60) { h += 1; m -= 60; }
+      if (h > 23) break;
+    }
+    return out;
+  }, [diaAtual, janela, horariosConfig, chaveMin, minHHMM]);
+
+  const emitir = (novoDia, hhmm) => {
+    if (!novoDia || !hhmm) { setErro(''); onChange(''); return; }
+    const alvo = dias.find((x) => x.chave === novoDia);
+    if (!alvo || !alvo.j.ativo) { setErro('A loja não atende nesse dia.'); onChange(''); return; }
+    if (hhmm < alvo.j.abertura || hhmm > alvo.j.fechamento) { setErro(`Escolha um horário entre ${alvo.j.abertura} e ${alvo.j.fechamento}.`); onChange(''); return; }
+    if (novoDia === chaveMin && hhmm < minHHMM) { setErro(`Nesse dia, só a partir das ${minHHMM}.`); onChange(''); return; }
+    setErro('');
+    onChange(`${novoDia}T${hhmm}`);
+  };
+
+  const escolherDia = (x) => {
+    if (x.semHorario) return;
+    setDia(x.chave);
+    emitir(x.chave, texto.length === 5 ? normalizarHora(texto) : '');
+  };
+  const digitar = (e) => {
+    const dig = e.target.value.replace(/\D/g, '').slice(0, 4);
+    const mostrado = dig.length > 2 ? `${dig.slice(0, 2)}:${dig.slice(2)}` : dig;
+    setTexto(mostrado);
+    if (dig.length === 4) emitir(dia, normalizarHora(dig)); else { setErro(''); onChange(''); }
+  };
+  const aoSair = () => {
+    const n = normalizarHora(texto);
+    if (!texto) return;
+    if (!n) { setErro('Horário inválido. Use o formato 15:30.'); onChange(''); return; }
+    setTexto(n);
+    emitir(dia, n);
+  };
+  const escolherSugestao = (hhmm) => { setTexto(hhmm); emitir(dia, hhmm); };
+
+  const resumo = value && diaAtual
+    ? `${DIAS_CURTOS[diaAtual.d.getDay()]}, ${pad2(diaAtual.d.getDate())}/${pad2(diaAtual.d.getMonth() + 1)} às ${valorHora}`
+    : null;
+
+  return (
+    <div className="space-y-2.5">
+      <div>
+        <p className="text-sm font-medium text-gray-700 mb-1">Dia</p>
+        <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="listbox" aria-label="Dia do agendamento">
+          {dias.map((x) => {
+            const sel = x.chave === dia;
+            return (
+              <button
+                key={x.chave} type="button" role="option" aria-selected={sel} disabled={x.semHorario}
+                onClick={() => escolherDia(x)}
+                className={`shrink-0 w-14 rounded-lg border py-1.5 text-center leading-tight ${x.semHorario ? 'opacity-40 bg-gray-50' : 'bg-white'}`}
+                style={sel ? { borderColor: cor, backgroundColor: `${cor}14`, color: cor } : undefined}
+              >
+                <span className="block text-[11px] font-semibold uppercase">{x.rotulo}</span>
+                <span className="block text-base font-bold">{pad2(x.d.getDate())}</span>
+                <span className="block text-[10px] text-gray-500">{x.semHorario ? 'fechado' : MESES_CURTOS[x.d.getMonth()]}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div>
+        <label htmlFor={id} className="text-sm font-medium text-gray-700 mb-1 block">Horário</label>
+        <Input
+          id={id} inputMode="numeric" autoComplete="off" placeholder="Ex: 15:30" maxLength={5}
+          value={texto} onChange={digitar} onBlur={aoSair} disabled={!diaAtual}
+          className="text-base font-semibold"
+        />
+        {diaAtual && janela?.ativo && (
+          <p className="text-xs text-gray-500 mt-1">
+            Atendemos das {janela.abertura} às {janela.fechamento}{inicioMin !== janela.abertura ? ` (hoje, a partir das ${inicioMin})` : ''}.
+          </p>
+        )}
+        {!diaAtual && <p className="text-xs text-gray-500 mt-1">Escolha o dia primeiro.</p>}
+        {sugestoes.length > 0 && (
+          <div className="mt-1.5 flex gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" aria-label="Horários sugeridos">
+            {sugestoes.map((hh) => {
+              const sel = texto === hh;
+              return (
+                <button
+                  key={hh} type="button" onClick={() => escolherSugestao(hh)}
+                  className="shrink-0 rounded-full border bg-white px-2.5 py-1 text-sm"
+                  style={sel ? { borderColor: cor, backgroundColor: `${cor}14`, color: cor, fontWeight: 700 } : undefined}
+                >
+                  {hh}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {erro && <p role="alert" className="text-sm text-red-600 mt-1">{erro}</p>}
+        {resumo && !erro && <p className="text-sm font-semibold mt-1.5" style={{ color: cor }}>Agendado para {resumo}</p>}
+      </div>
+    </div>
+  );
+}
+
 // Etapa do "Finalizar pedido\": aberta (cor da loja), concluída (resumo + Trocar) ou bloqueada (cinza).
 function SecaoCheckout({ id, titulo, estado, cor, resumo, onTrocar, bloqueadaMsg, children }) {
   const ativa = estado === 'ativa';
@@ -1328,9 +1486,6 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
     return null;
   })();
   const minDataAgendamento = new Date(Date.now() + antecedenciaHoras * 60 * 60 * 1000);
-  const minDataAgendamentoStr = new Date(minDataAgendamento.getTime() - minDataAgendamento.getTimezoneOffset() * 60000)
-    .toISOString()
-    .slice(0, 16);
 
   // Se a loja estiver fechada agora e agendamento estiver ativo, já sugere agendar
   useEffect(() => {
@@ -3206,13 +3361,13 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                   </Button>
                 </div>
                 {form.quando === 'agendar' && (
-                  <Input
-                    type="datetime-local"
-                    className="mt-2"
-                    min={minDataAgendamentoStr}
-                    value={form.dataAgendamento}
-                    onChange={(e) => setForm((f) => ({ ...f, dataAgendamento: e.target.value }))}
-                  />
+                  <div className="mt-2">
+                    <SeletorAgendamento
+                      id="p-agendar-balcao" cor={cor} value={form.dataAgendamento} minData={minDataAgendamento}
+                      horariosConfig={modoBalcao ? null : horariosConfig}
+                      onChange={(v) => setForm((f) => ({ ...f, dataAgendamento: v }))}
+                    />
+                  </div>
                 )}
                 {form.quando === 'agendar' && antecedenciaHoras > 0 && (
                   <p className="text-sm text-gray-400 mt-1">Agendamentos precisam de pelo menos {antecedenciaHoras}h de antecedência.</p>
@@ -3388,9 +3543,10 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                 />
                 {form.quando === 'agendar' && (
                   <div className="space-y-2">
-                    <Input
-                      type="datetime-local" id="p-agendar" min={minDataAgendamentoStr} value={form.dataAgendamento}
-                      onChange={(e) => setForm((f) => ({ ...f, dataAgendamento: e.target.value }))}
+                    <SeletorAgendamento
+                      id="p-agendar" cor={cor} value={form.dataAgendamento} minData={minDataAgendamento}
+                      horariosConfig={horariosConfig}
+                      onChange={(v) => setForm((f) => ({ ...f, dataAgendamento: v }))}
                     />
                     {antecedenciaHoras > 0 && <p className="text-sm text-gray-400">Agendamentos precisam de pelo menos {antecedenciaHoras}h de antecedência.</p>}
                     <Button
