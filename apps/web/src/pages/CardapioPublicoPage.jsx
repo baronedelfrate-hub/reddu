@@ -2444,28 +2444,28 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
               {/* círculos decorativos */}
               <span className="absolute -right-10 -top-12 h-40 w-40 rounded-full bg-white/10" aria-hidden="true" />
               <span className="absolute -bottom-16 right-16 h-36 w-36 rounded-full bg-black/10" aria-hidden="true" />
-              <div className="relative flex items-center justify-between gap-2 pl-4 pr-2 py-4">
+              <div className="relative flex items-center justify-between gap-2 pl-4 pr-2 py-2.5">
                 <div className="min-w-0">
-                  <span className="inline-block text-[11px] font-extrabold tracking-widest uppercase bg-white/20 rounded-full px-2.5 py-0.5">Cashback</span>
+                  <span className="inline-block text-[10px] font-extrabold tracking-widest uppercase bg-white/20 rounded-full px-2 py-0.5">Cashback</span>
                   {cashbackSaldo > 0 ? (
                     <>
-                      <p className="text-sm font-medium opacity-90 mt-2 leading-none">Você tem</p>
-                      <p className="text-4xl font-black leading-tight tracking-tight">{formatPreco(cashbackSaldo)}</p>
-                      <p className="text-sm opacity-95 leading-snug">para usar no próximo pedido{cashbackInfo.so_online ? (onlineMulti ? ' pagando online' : ' com PIX') : ''}</p>
+                      <p className="text-xs font-medium opacity-90 mt-1.5 leading-none">Você tem</p>
+                      <p className="text-2xl font-black leading-tight tracking-tight">{formatPreco(cashbackSaldo)}</p>
+                      <p className="text-xs opacity-95 leading-snug">para usar no próximo pedido{cashbackInfo.so_online ? (onlineMulti ? ' pagando online' : ' com PIX') : ''}</p>
                     </>
                   ) : (
                     <>
-                      <p className="text-4xl font-black leading-tight tracking-tight mt-1">{Number(cashbackInfo.percentual)}% <span className="text-2xl font-extrabold">de volta</span></p>
-                      <p className="text-sm opacity-95 leading-snug">
+                      <p className="text-2xl font-black leading-tight tracking-tight mt-1">{Number(cashbackInfo.percentual)}% <span className="text-lg font-extrabold">de volta</span></p>
+                      <p className="text-xs opacity-95 leading-snug">
                         {cashbackInfo.so_online ? (onlineMulti ? 'pagando online, para usar no próximo pedido' : 'pagando com PIX, para usar no próximo pedido') : 'em todos os pedidos, para usar no próximo'}
                       </p>
                     </>
                   )}
-                  <span className="inline-flex items-center gap-1 mt-3 bg-white rounded-full px-3.5 py-1.5 text-sm font-extrabold" style={{ color: corCapa || '#dc2626' }}>
+                  <span className="inline-flex items-center gap-1 mt-2 bg-white rounded-full px-3 py-1 text-[13px] font-extrabold" style={{ color: corCapa || '#dc2626' }}>
                     {cashbackSaldo > 0 ? 'Ver meu saldo' : 'Aproveite já'} <span aria-hidden="true">→</span>
                   </span>
                 </div>
-                <svg viewBox="0 0 120 120" className="h-32 w-32 shrink-0 drop-shadow-md" aria-hidden="true">
+                <svg viewBox="0 0 120 120" className="h-20 w-20 shrink-0 drop-shadow-md" aria-hidden="true">
                   <ellipse cx="58" cy="106" rx="38" ry="7" fill="rgba(0,0,0,0.25)" />
                   {[92, 80, 68].map((y) => (
                     <g key={y}>
