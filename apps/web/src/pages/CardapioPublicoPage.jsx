@@ -2843,6 +2843,26 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
             const saboresDoItem = saboresPorItem[comboItemAberto.id] || [];
             // Foto principal do item; sem ela, uma faixa com as fotos dos sabores
             const fotosSabores = comboItemAberto.imagem_url ? [] : saboresDoItem.map((sb) => sb.imagem_url).filter(Boolean).slice(0, 4);
+            // Cashback em tempo real do que está sendo montado (muda a cada sabor/adicional escolhido).
+            let cashbackDoItem = 0;
+            if (cashbackAtivo && Number(cashbackInfo.percentual) > 0) {
+              const linhaAtual = {
+                item: comboItemAberto,
+                isCombo: isComboItem,
+                quantidade: 1,
+                sabores: isComboItem
+                  ? saboresDoItem.filter((sb) => (comboSelecoes[sb.id] || 0) > 0)
+                    .map((sb) => ({ opcaoId: sb.id, nome: sb.nome, quantidade: comboSelecoes[sb.id], precoAdicional: Number(sb.preco_adicional) }))
+                  : [],
+                adicionais: gruposDoItem.flatMap((grupo) => (adicionaisSelecionados[grupo.id] || [])
+                  .map((opcaoId) => grupo.opcoes.find((o) => o.id === opcaoId))
+                  .filter(Boolean)
+                  .map((o) => ({ opcaoId: o.id, grupoId: grupo.id, nome: o.nome, precoAdicional: Number(o.preco_adicional) }))),
+                fatorPreco: isComboItem ? fatorPrecoCombo(comboItemAberto, comboTotalSelecionado) : 1,
+              };
+              const base = isComboItem && !comboAtingiuMinimo(comboItemAberto, comboTotalSelecionado) ? 0 : precoLinha(linhaAtual);
+              cashbackDoItem = Math.round(Math.max(0, base) * Number(cashbackInfo.percentual)) / 100;
+            }
             return (
             <>
               <div className="sticky top-0 z-30 h-0 flex justify-end">
@@ -2862,6 +2882,17 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
               ) : null}
               <DialogHeader>
                 <DialogTitle className="text-base sm:text-lg leading-snug">{comboItemAberto.nome}</DialogTitle>
+                {cashbackAtivo && Number(cashbackInfo.percentual) > 0 && (
+                  <div
+                    data-testid="cashback-item"
+                    className="inline-flex items-center gap-1.5 rounded-full bg-purple-50 text-purple-900 text-[13px] px-2.5 py-1 w-fit"
+                  >
+                    <Coins className="h-3.5 w-3.5 shrink-0" />
+                    {cashbackDoItem > 0
+                      ? <span>Você vai ganhar <b>{formatPreco(cashbackDoItem)}</b> de cashback{cashbackInfo.so_online ? ' pagando online' : ''}</span>
+                      : <span>Ganhe <b>{Number(cashbackInfo.percentual)}%</b> de cashback{cashbackInfo.so_online ? ' pagando online' : ''}</span>}
+                  </div>
+                )}
                 <DialogDescription className="text-[13px] leading-snug">
                   {comboItemAberto.descricao}
                   {isComboItem && (
