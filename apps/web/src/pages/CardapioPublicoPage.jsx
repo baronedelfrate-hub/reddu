@@ -691,6 +691,33 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
     })();
   }, [empresa]);
 
+  // Tela "Meus Pedidos" aberta: atualiza sozinha a cada 5s (só com a aba visível), pra o cliente ver o
+  // andamento do pedido (confirmado, em preparo, pronto...) sem sair e voltar na tela.
+  useEffect(() => {
+    if (!empresa || viewAtual !== 'pedidos' || !buscaNome.trim() || !buscaTelefone.trim()) return undefined;
+    let cancelado = false;
+    let emCurso = false;
+    const atualizar = async () => {
+      if (cancelado || emCurso || document.visibilityState !== 'visible') return;
+      emCurso = true;
+      try {
+        const { data, error } = await supabase.rpc('rpc_buscar_pedidos_cliente', {
+          p_empresa_id: empresa.id,
+          p_telefone: buscaTelefone.trim(),
+          p_nome: buscaNome.trim(),
+        });
+        if (!error && !cancelado && Array.isArray(data)) {
+          setPedidosCliente(data);
+          setHistoricoPedidos(data);
+        }
+      } catch (e) { /* tenta de novo no próximo ciclo */ } finally { emCurso = false; }
+    };
+    atualizar(); // ao abrir a tela com nome/telefone salvos já carrega a lista
+    const intervalo = setInterval(atualizar, 5000);
+    document.addEventListener('visibilitychange', atualizar); // ao voltar pra aba, atualiza na hora
+    return () => { cancelado = true; clearInterval(intervalo); document.removeEventListener('visibilitychange', atualizar); };
+  }, [empresa, viewAtual, buscaNome, buscaTelefone]);
+
   // Busca a config pública de pagamento (provider + o que está ativo,
   // nunca as credenciais) assim que a empresa carrega.
   useEffect(() => {
@@ -1275,6 +1302,8 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
     const agora = new Date().toTimeString().slice(0, 5);
     return agora >= h.abertura && agora <= h.fechamento;
   })();
+  // Loja fechada: o aviso aparece num lugar só (faixa logo abaixo do cabeçalho) e a capa fica em preto e branco.
+  const lojaFechadaAviso = !lojaAbertaAgora && !!(agendamentoAtivo || horariosConfig || lojaStatusManual);
   // Linha "Aberto até 18h00 / Abre amanhã às 09h20" da tela inicial.
   const infoHorario = (() => {
     if (lojaStatusManual === 'fechada') return 'Loja fechada no momento';
@@ -2146,7 +2175,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
           {capaUrl ? (
             <div className="w-full h-32" style={{ backgroundColor: corCapa || '#dc2626' }}>
               <div className="max-w-2xl mx-auto h-full">
-                <img src={capaUrl} alt="" className="h-full w-full object-cover" />
+                <img src={capaUrl} alt="" className={`h-full w-full object-cover transition-[filter] ${lojaFechadaAviso ? 'grayscale' : ''}`} />
               </div>
             </div>
           ) : (
@@ -2164,7 +2193,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
               )}
               <div className="flex-1 min-w-0">
                 <h1 className="text-xl font-extrabold text-gray-900 leading-tight">{empresa.nome}</h1>
-                {(horariosConfig || lojaStatusManual) && (
+                {(horariosConfig || lojaStatusManual) && lojaAbertaAgora && (
                   <span
                     className={`inline-flex items-center gap-1 text-xs font-medium rounded-full px-2 py-0.5 mt-1 ${lojaAbertaAgora ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
                       }`}
@@ -2189,13 +2218,19 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                 <Info className="h-4 w-4 text-gray-500" />
               </button>
             </div>
-            {(infoHorario || valorMinimoEntrega > 0) && (
+            {((infoHorario && !(lojaFechadaAviso && lojaStatusManual === 'fechada')) || valorMinimoEntrega > 0) && (
               <div className="max-w-2xl mx-auto px-4 pb-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm text-gray-500">
-                {infoHorario && (
+                {infoHorario && !(lojaFechadaAviso && lojaStatusManual === 'fechada') && (
                   <span className="inline-flex items-center gap-1 font-bold text-gray-800"><Clock className="h-3.5 w-3.5" />{infoHorario}</span>
                 )}
-                {infoHorario && valorMinimoEntrega > 0 && <span aria-hidden="true">•</span>}
+                {infoHorario && !(lojaFechadaAviso && lojaStatusManual === 'fechada') && valorMinimoEntrega > 0 && <span aria-hidden="true">•</span>}
                 {valorMinimoEntrega > 0 && <span className="font-bold text-gray-800">Pedido mín. {formatPreco(valorMinimoEntrega)}</span>}
+              </div>
+            )}
+            {lojaFechadaAviso && (
+              <div role="status" className="bg-amber-50 border-y border-amber-200 text-amber-900 text-center px-4 py-2 text-sm leading-snug">
+                <b>Loja fechada agora</b>
+                {agendamentoAtivo && <> — aceitamos <b>pedidos agendados</b>. Faça já o seu!</>}
               </div>
             )}
           </header>
@@ -2226,11 +2261,6 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
           )}
           {(termoBusca || categorias.length <= 1) && <div className="border-b" />}
 
-          {agendamentoAtivo && !lojaAbertaAgora && (
-            <div className="bg-red-50 text-red-700 text-base text-center py-2 px-4">
-              Loja fechada agora — só aceitamos pedidos agendados.
-            </div>
-          )}
         </>
       )}
 
