@@ -2843,26 +2843,25 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
             const saboresDoItem = saboresPorItem[comboItemAberto.id] || [];
             // Foto principal do item; sem ela, uma faixa com as fotos dos sabores
             const fotosSabores = comboItemAberto.imagem_url ? [] : saboresDoItem.map((sb) => sb.imagem_url).filter(Boolean).slice(0, 4);
-            // Cashback em tempo real do que está sendo montado (muda a cada sabor/adicional escolhido).
-            let cashbackDoItem = 0;
-            if (cashbackAtivo && Number(cashbackInfo.percentual) > 0) {
-              const linhaAtual = {
-                item: comboItemAberto,
-                isCombo: isComboItem,
-                quantidade: 1,
-                sabores: isComboItem
-                  ? saboresDoItem.filter((sb) => (comboSelecoes[sb.id] || 0) > 0)
-                    .map((sb) => ({ opcaoId: sb.id, nome: sb.nome, quantidade: comboSelecoes[sb.id], precoAdicional: Number(sb.preco_adicional) }))
-                  : [],
-                adicionais: gruposDoItem.flatMap((grupo) => (adicionaisSelecionados[grupo.id] || [])
-                  .map((opcaoId) => grupo.opcoes.find((o) => o.id === opcaoId))
-                  .filter(Boolean)
-                  .map((o) => ({ opcaoId: o.id, grupoId: grupo.id, nome: o.nome, precoAdicional: Number(o.preco_adicional) }))),
-                fatorPreco: isComboItem ? fatorPrecoCombo(comboItemAberto, comboTotalSelecionado) : 1,
-              };
-              const base = precoLinha(linhaAtual); // já mostra o valor acumulado a cada item escolhido, mesmo antes do mínimo
-              cashbackDoItem = Math.round(Math.max(0, base) * Number(cashbackInfo.percentual)) / 100;
-            }
+            // Total e cashback em tempo real do que está sendo montado (mudam a cada sabor/adicional escolhido).
+            const linhaAtual = {
+              item: comboItemAberto,
+              isCombo: isComboItem,
+              quantidade: 1,
+              sabores: isComboItem
+                ? saboresDoItem.filter((sb) => (comboSelecoes[sb.id] || 0) > 0)
+                  .map((sb) => ({ opcaoId: sb.id, nome: sb.nome, quantidade: comboSelecoes[sb.id], precoAdicional: Number(sb.preco_adicional) }))
+                : [],
+              adicionais: gruposDoItem.flatMap((grupo) => (adicionaisSelecionados[grupo.id] || [])
+                .map((opcaoId) => grupo.opcoes.find((o) => o.id === opcaoId))
+                .filter(Boolean)
+                .map((o) => ({ opcaoId: o.id, grupoId: grupo.id, nome: o.nome, precoAdicional: Number(o.preco_adicional) }))),
+              fatorPreco: isComboItem ? fatorPrecoCombo(comboItemAberto, comboTotalSelecionado) : 1,
+            };
+            const totalDoItem = Math.max(0, precoLinha(linhaAtual));
+            const cashbackDoItem = cashbackAtivo && Number(cashbackInfo.percentual) > 0
+              ? Math.round(totalDoItem * Number(cashbackInfo.percentual)) / 100
+              : 0;
             return (
             <>
               <div className="sticky top-0 z-30 h-0 flex justify-end">
@@ -2910,14 +2909,9 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                   {comboEhMinimo(comboItemAberto)
                     ? `${comboTotalSelecionado} escolhidos (mínimo ${comboItemAberto.combo_quantidade_total}${comboItemAberto.quantidade_maxima ? `, máx. ${comboItemAberto.quantidade_maxima}` : ''})`
                     : `${comboTotalSelecionado} / ${comboItemAberto.combo_quantidade_total} escolhidos`}
-                  {comboEhMinimo(comboItemAberto) && comboTotalSelecionado >= comboItemAberto.combo_quantidade_total && (
-                    <span className="block text-xs font-normal mt-0.5">
-                      Total: {formatPreco(
-                        Number(comboItemAberto.preco) * fatorPrecoCombo(comboItemAberto, comboTotalSelecionado)
-                        + (saboresPorItem[comboItemAberto.id] || []).reduce(
-                          (s, sabor) => s + (comboSelecoes[sabor.id] || 0) * Number(sabor.preco_adicional), 0
-                        )
-                      )}
+                  {totalDoItem > 0 && (
+                    <span data-testid="total-item" className="block text-xl font-extrabold leading-tight mt-0.5">
+                      Total: {formatPreco(totalDoItem)}
                     </span>
                   )}
                 </div>
