@@ -2860,7 +2860,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                   .map((o) => ({ opcaoId: o.id, grupoId: grupo.id, nome: o.nome, precoAdicional: Number(o.preco_adicional) }))),
                 fatorPreco: isComboItem ? fatorPrecoCombo(comboItemAberto, comboTotalSelecionado) : 1,
               };
-              const base = isComboItem && !comboAtingiuMinimo(comboItemAberto, comboTotalSelecionado) ? 0 : precoLinha(linhaAtual);
+              const base = precoLinha(linhaAtual); // já mostra o valor acumulado a cada item escolhido, mesmo antes do mínimo
               cashbackDoItem = Math.round(Math.max(0, base) * Number(cashbackInfo.percentual)) / 100;
             }
             return (
