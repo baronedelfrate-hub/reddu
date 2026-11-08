@@ -138,7 +138,7 @@ function SeletorAgendamento({ value, onChange, horariosConfig, minData, cor, id 
   const dias = useMemo(() => {
     const hoje = new Date(); hoje.setHours(12, 0, 0, 0);
     const lista = [];
-    for (let i = 0; i < 30 && lista.length < 14; i++) {
+    for (let i = 0; i < 60; i++) { // próximos 60 dias (só entram os dias em que a loja atende)
       const d = new Date(hoje.getTime() + i * 86400000);
       const chave = chaveDia(d);
       if (chave < chaveMin) continue;
