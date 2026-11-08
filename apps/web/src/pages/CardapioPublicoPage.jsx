@@ -1694,6 +1694,28 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
   const pecaDeNovoPorHistorico = itensRecompra.length > 0;
   const listaPecaDeNovo = pecaDeNovoPorHistorico ? itensRecompra : itensDestaque;
 
+  // "Peça também" no checkout: destaques e favoritos do cliente primeiro, depois o resto do cardápio,
+  // sempre sem o que já está no carrinho.
+  const sugestoesPecaTambem = (() => {
+    if (modoBalcao) return [];
+    const noCarrinho = new Set(cart.map((c) => c.item.id));
+    const vistos = new Set();
+    return [...itensRecompra, ...itensDestaque, ...todosItens]
+      .filter((i) => {
+        if (!i || vistos.has(i.id) || noCarrinho.has(i.id) || !podePedir(i) || !itemNoHorario(i, new Date())) return false;
+        vistos.add(i.id);
+        return true;
+      })
+      .slice(0, 10);
+  })();
+  const pecaTambem = (item) => {
+    const precisaTela = item.combo_quantidade_total != null || (gruposPorItem[item.id] || []).length > 0;
+    if (precisaTela) { setCheckoutOpen(false); abrirCombo(item); return; } // abre a tela de escolha; o carrinho espera
+    addSimplesToCart(item);
+    setMostrarItens(true);
+    toast({ title: 'Adicionado ao pedido', description: item.nome });
+  };
+
   // Pedir de novo: tenta recriar o carrinho a partir de um pedido antigo.
   // Item simples é fácil (mesmo cardapio_item_id). Combo é reconstruído
   // batendo o produto de cada sabor contra as opções atuais do item — se
@@ -3242,6 +3264,48 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
           </div>
           )}
 
+          {!modoBalcao && (
+            <div className="space-y-2">
+              {sugestoesPecaTambem.length > 0 && (
+                <section aria-label="Peça também">
+                  <h3 className="text-sm font-bold text-gray-900 mb-1.5">Peça também</h3>
+                  <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                    {sugestoesPecaTambem.map((item) => (
+                      <button
+                        key={item.id} type="button" onClick={() => pecaTambem(item)}
+                        className="shrink-0 w-28 bg-white border rounded-lg overflow-hidden text-left"
+                      >
+                        <div className="relative h-16 w-full bg-gray-100 flex items-center justify-center overflow-hidden">
+                          {item.imagem_url ? <img src={item.imagem_url} alt="" className="h-full w-full object-cover" /> : <ImageOff className="h-4 w-4 text-gray-300" />}
+                          <span className="absolute right-1 bottom-1 h-6 w-6 rounded-md text-white flex items-center justify-center" style={{ backgroundColor: cor }} aria-hidden="true">
+                            <Plus className="h-4 w-4" />
+                          </span>
+                        </div>
+                        <div className="px-1.5 py-1">
+                          <p className="text-xs font-semibold text-gray-900 line-clamp-2 leading-tight">{item.nome}</p>
+                          {Number(item.preco) > 0 && <p className="text-xs font-extrabold mt-0.5" style={{ color: cor }}>{formatPreco(item.preco)}</p>}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
+              <button
+                type="button" onClick={() => setCheckoutOpen(false)}
+                className="w-full text-center text-sm font-bold py-1.5" style={{ color: cor }}
+              >
+                Adicionar mais produtos
+              </button>
+              <div>
+                <Label htmlFor="p-obs" className="text-sm">Observação (opcional)</Label>
+                <Textarea
+                  id="p-obs" rows={2} maxLength={300} placeholder="Ex: sem cebola, embalar separado…"
+                  value={form.observacao} onChange={(e) => setForm((f) => ({ ...f, observacao: e.target.value }))}
+                />
+              </div>
+            </div>
+          )}
+
           {modoBalcao && (
           <>
           <div className="space-y-3">
@@ -3793,10 +3857,6 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                     : 'No cartão a taxa de entrega inclui o retorno da maquininha — calcule o frete para ver o valor.'}
                 </p>
               )}
-              <div>
-                <Label htmlFor="p-obs">Observação (opcional)</Label>
-                <Textarea id="p-obs" value={form.observacao} onChange={(e) => setForm((f) => ({ ...f, observacao: e.target.value }))} rows={2} />
-              </div>
             </SecaoCheckout>
           </div>
           )}
