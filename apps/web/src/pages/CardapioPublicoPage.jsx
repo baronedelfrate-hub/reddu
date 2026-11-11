@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { QRCodeSVG } from 'qrcode.react';
 import { useParams } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
 import { supabasePublico as supabase } from '@/lib/publicSupabaseClient';
@@ -2241,6 +2242,11 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
             src={`data:image/png;base64,${pagamentoAtual.qrCodeBase64}`}
             alt="QR Code PIX" className="w-56 h-56 border rounded-lg bg-white p-2"
           />
+        ) : pagamentoAtual.qrCodeString ? (
+          // a Cielo nem sempre manda a imagem: gera o QR a partir do código "copia e cola"
+          <div className="border rounded-lg bg-white p-3" role="img" aria-label="QR Code PIX">
+            <QRCodeSVG value={pagamentoAtual.qrCodeString} size={208} level="M" />
+          </div>
         ) : (
           <div className="w-56 h-56 border rounded-lg bg-white flex items-center justify-center text-base text-gray-400">
             QR code indisponível
