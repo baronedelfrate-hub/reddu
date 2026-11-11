@@ -21,6 +21,15 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+// A Cielo nem sempre usa a mesma capitalização nos nomes dos campos (ex.: "QrcodeBase64Image" x
+// "QrCodeBase64Image"), então procuramos o campo sem diferenciar maiúsculas de minúsculas.
+function campo(obj: any, nome: string): string | null {
+  if (!obj || typeof obj !== 'object') return null;
+  const k = Object.keys(obj).find((x) => x.toLowerCase() === nome.toLowerCase());
+  const v = k ? obj[k] : null;
+  return typeof v === 'string' && v ? v : null;
+}
+
 const API_QUERY_BASE = {
   sandbox: 'https://apiquerysandbox.cieloecommerce.cielo.com.br',
   producao: 'https://apiquery.cieloecommerce.cielo.com.br',
@@ -112,8 +121,8 @@ Deno.serve(async (req) => {
       status: novoStatus,
       numeroPedido: pedido.numero_pedido,
       total: pedido.total,
-      qrCodeBase64: novoStatus === 'pendente' ? (cieloData.Payment.QrCodeBase64Image || null) : null,
-      qrCodeString: novoStatus === 'pendente' ? (cieloData.Payment.QrCodeString || null) : null,
+      qrCodeBase64: novoStatus === 'pendente' ? campo(cieloData.Payment, 'QrCodeBase64Image') : null,
+      qrCodeString: novoStatus === 'pendente' ? campo(cieloData.Payment, 'QrCodeString') : null,
     });
   } catch (error) {
     console.error('[cielo-verificar-pagamento] erro:', error);

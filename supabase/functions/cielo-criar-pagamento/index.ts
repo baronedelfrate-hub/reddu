@@ -25,6 +25,15 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+// A Cielo nem sempre usa a mesma capitalização nos nomes dos campos (ex.: "QrcodeBase64Image" x
+// "QrCodeBase64Image"), então procuramos o campo sem diferenciar maiúsculas de minúsculas.
+function campo(obj: any, nome: string): string | null {
+  if (!obj || typeof obj !== 'object') return null;
+  const k = Object.keys(obj).find((x) => x.toLowerCase() === nome.toLowerCase());
+  const v = k ? obj[k] : null;
+  return typeof v === 'string' && v ? v : null;
+}
+
 const API_BASE = {
   sandbox: 'https://apisandbox.cieloecommerce.cielo.com.br',
   producao: 'https://api.cieloecommerce.cielo.com.br',
@@ -106,11 +115,18 @@ Deno.serve(async (req) => {
       })
       .eq('id', pedido.id);
 
+    const qrCodeBase64 = campo(payment, 'QrCodeBase64Image');
+    const qrCodeString = campo(payment, 'QrCodeString');
+    if (!qrCodeBase64 && !qrCodeString) {
+      // só os NOMES dos campos (sem valores), pra descobrir o que a Cielo mandou
+      console.error('[cielo-criar-pagamento] resposta sem QR code. Campos:', Object.keys(payment).join(','));
+    }
+
     return jsonResponse({
       success: true,
       paymentId: payment.PaymentId,
-      qrCodeBase64: payment.QrCodeBase64Image || null,
-      qrCodeString: payment.QrCodeString || null,
+      qrCodeBase64: qrCodeBase64,
+      qrCodeString: qrCodeString,
     });
   } catch (error) {
     console.error('[cielo-criar-pagamento] erro:', error);
