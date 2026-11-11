@@ -19,7 +19,7 @@ import {
 import {
   Loader2, UtensilsCrossed, ImageOff, Plus, Minus, ShoppingCart, CheckCircle2, Trash2,
   Home, ClipboardList, Info, ArrowLeft, Tag, Clock, CreditCard, MapPin, Search,
-Coins, User, Smartphone, Store, CalendarDays, Zap, MessageCircle, ExternalLink, Pencil, RefreshCw, X } from 'lucide-react';
+Coins, User, Smartphone, Store, CalendarDays, Zap, MessageCircle, ExternalLink, Pencil, RefreshCw, X, Copy } from 'lucide-react';
 
 // Carregamento do cardápio: se uma consulta travar (rede instável), tenta de novo
 // sozinho em vez de deixar o círculo girando para sempre.
@@ -654,7 +654,9 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
   const [formaPagamento, setFormaPagamento] = useState('entrega'); // 'pix' | 'entrega'
   const [pagamentoEntregaTipo, setPagamentoEntregaTipo] = useState('dinheiro'); // 'dinheiro' | 'cartao' (quando paga na entrega/retirada)
   const [trocoPara, setTrocoPara] = useState('');
+  const [pixCopiado, setPixCopiado] = useState(false);
   const [pagamentoAtual, setPagamentoAtual] = useState(null); // { pedidoId, numeroPedido, qrCodeBase64, qrCodeString }
+  useEffect(() => { if (pagamentoAtual) window.scrollTo(0, 0); }, [!!pagamentoAtual]); // abre a tela do PIX sempre no topo
   const [retomandoPagamentoId, setRetomandoPagamentoId] = useState(null);
   const [cancelTarget, setCancelTarget] = useState(null);
   const [cancelando, setCancelando] = useState(false);
@@ -2236,51 +2238,104 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
   }
 
   if (pagamentoAtual) {
+    const corPix = corCapa || '#dc2626';
+    const copiarPix = async () => {
+      try {
+        await navigator.clipboard.writeText(pagamentoAtual.qrCodeString);
+        setPixCopiado(true);
+        setTimeout(() => setPixCopiado(false), 2500);
+      } catch (e) {
+        toast({ title: 'Não foi possível copiar', description: 'Selecione o código e copie manualmente.', variant: 'destructive' });
+      }
+    };
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-[#eceef1] text-center p-6">
-        <h1 className="text-2xl font-bold text-gray-900">Pedido #{pagamentoAtual.numeroPedido} — Pague com PIX</h1>
-        <p className="text-gray-500 mt-1 mb-4">{formatPreco(pagamentoAtual.pedidoInfo.total)}</p>
-        {pagamentoAtual.qrCodeBase64 ? (
-          <img
-            src={`data:image/png;base64,${pagamentoAtual.qrCodeBase64}`}
-            alt="QR Code PIX" className="w-56 h-56 border rounded-lg bg-white p-2"
-          />
-        ) : pagamentoAtual.qrCodeString ? (
-          // a Cielo nem sempre manda a imagem: gera o QR a partir do código "copia e cola"
-          <div className="border rounded-lg bg-white p-3" role="img" aria-label="QR Code PIX">
-            <QRCodeSVG value={pagamentoAtual.qrCodeString} size={208} level="M" />
-          </div>
-        ) : (
-          <div className="w-56 h-56 border rounded-lg bg-white flex items-center justify-center text-base text-gray-400">
-            QR code indisponível
-          </div>
-        )}
-        {pagamentoAtual.qrCodeString && (
-          <div className="mt-4 w-full max-w-xs">
-            <Label className="text-sm text-gray-500">Ou copie o código PIX</Label>
-            <div className="flex gap-2 mt-1">
-              <Input readOnly value={pagamentoAtual.qrCodeString} className="text-sm" />
-              <Button
-                type="button" variant="outline" size="sm"
-                onClick={() => { navigator.clipboard.writeText(pagamentoAtual.qrCodeString); toast({ title: 'Código copiado!' }); }}
-              >
-                Copiar
-              </Button>
+      <div className="min-h-screen bg-[#eceef1] flex flex-col items-center">
+        <div className="w-full" style={{ backgroundColor: corPix }}>
+          <div className="max-w-md mx-auto px-4 pt-5 pb-16 flex items-center gap-3 text-white">
+            {empresa?.logo_url ? (
+              <img src={empresa.logo_url} alt="" className="h-11 w-11 rounded-full object-cover border-2 border-white/80 bg-white" />
+            ) : (
+              <div className="h-11 w-11 rounded-full bg-white/20 flex items-center justify-center"><UtensilsCrossed className="h-5 w-5" /></div>
+            )}
+            <div className="min-w-0 text-left">
+              <p className="font-extrabold leading-tight truncate">{empresa?.nome}</p>
+              <p className="text-sm opacity-90 leading-tight">Pagamento via PIX</p>
             </div>
           </div>
-        )}
-        <p className="text-base text-gray-500 mt-4 flex items-center gap-2">
-          <Loader2 className="h-4 w-4 animate-spin" /> Aguardando confirmação do pagamento...
-        </p>
-        <Button
-          type="button" variant="ghost" size="sm" className="mt-6 text-gray-500"
-          onClick={() => { setPagamentoAtual(null); setViewAtual('pedidos'); handleBuscarPedidos(); }}
-        >
-          Fechar e pagar depois
-        </Button>
-        <p className="text-sm text-gray-400 mt-1 max-w-xs">
-          O pedido já foi registrado. Você pode voltar em "Meus Pedidos" a qualquer momento pra terminar o pagamento.
-        </p>
+        </div>
+
+        <div className="w-full max-w-md px-4 -mt-12 pb-8">
+          <div className="bg-white rounded-2xl shadow-lg p-5 text-center">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 text-amber-800 text-xs font-bold px-3 py-1">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75 animate-ping" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500" />
+              </span>
+              Aguardando pagamento
+            </span>
+            <p className="text-sm text-gray-500 mt-3">Pedido #{pagamentoAtual.numeroPedido}</p>
+            <p className="text-3xl font-black text-gray-900 leading-tight">{formatPreco(pagamentoAtual.pedidoInfo.total)}</p>
+
+            <div className="mt-4 mx-auto w-fit rounded-2xl p-1.5" style={{ backgroundColor: `${corPix}14` }}>
+              <div className="rounded-xl bg-white p-3 border" style={{ borderColor: `${corPix}33` }}>
+                {pagamentoAtual.qrCodeBase64 ? (
+                  <img src={`data:image/png;base64,${pagamentoAtual.qrCodeBase64}`} alt="QR Code PIX" className="h-52 w-52" />
+                ) : pagamentoAtual.qrCodeString ? (
+                  // a Cielo nem sempre manda a imagem: gera o QR a partir do código "copia e cola"
+                  <div role="img" aria-label="QR Code PIX"><QRCodeSVG value={pagamentoAtual.qrCodeString} size={208} level="M" /></div>
+                ) : (
+                  <div className="h-52 w-52 flex items-center justify-center text-base text-gray-400">QR code indisponível</div>
+                )}
+              </div>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">Aponte a câmera do app do seu banco para o QR code</p>
+
+            {pagamentoAtual.qrCodeString && (
+              <div className="mt-4">
+                <Button
+                  type="button" onClick={copiarPix}
+                  className="w-full h-12 text-base font-bold text-white gap-2"
+                  style={{ backgroundColor: pixCopiado ? '#16a34a' : corPix }}
+                >
+                  {pixCopiado ? <><CheckCircle2 className="h-5 w-5" /> Código copiado!</> : <><Copy className="h-5 w-5" /> Copiar código PIX</>}
+                </Button>
+                <p className="mt-2 text-[11px] leading-snug text-gray-400 break-all line-clamp-2 select-all">{pagamentoAtual.qrCodeString}</p>
+              </div>
+            )}
+
+            <div className="mt-4 rounded-xl bg-gray-50 border text-left p-3">
+              <p className="text-sm font-bold text-gray-800 mb-1.5">Como pagar</p>
+              <ol className="space-y-1.5 text-sm text-gray-600">
+                {[
+                  'Abra o app do seu banco e escolha a opção Pix.',
+                  'Escaneie o QR code ou use o Pix Copia e Cola.',
+                  'Confirme o pagamento. Esta tela atualiza sozinha.',
+                ].map((t, n) => (
+                  <li key={n} className="flex gap-2.5">
+                    <span className="mt-0.5 h-5 w-5 shrink-0 rounded-full text-white text-xs font-bold flex items-center justify-center" style={{ backgroundColor: corPix }}>{n + 1}</span>
+                    <span>{t}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+
+            <p className="text-sm text-gray-500 mt-4 flex items-center justify-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" /> Confirmando seu pagamento...
+            </p>
+          </div>
+
+          <div className="text-center mt-5">
+            <Button
+              type="button" variant="ghost" size="sm" className="text-gray-600"
+              onClick={() => { setPagamentoAtual(null); setViewAtual('pedidos'); handleBuscarPedidos(); }}
+            >
+              Fechar e pagar depois
+            </Button>
+            <p className="text-xs text-gray-400 mt-1 px-4">
+              O pedido já foi registrado. Você pode voltar em "Meus Pedidos" a qualquer momento pra terminar o pagamento.
+            </p>
+          </div>
+        </div>
       </div>
     );
   }
