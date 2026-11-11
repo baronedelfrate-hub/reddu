@@ -110,15 +110,6 @@ Deno.serve(async (req) => {
 
     const payment = cieloData.Payment;
 
-    await serviceClient
-      .from('pedidos_cardapio')
-      .update({
-        forma_pagamento_online: 'pix',
-        status_pagamento: 'pendente',
-        cielo_payment_id: payment.PaymentId,
-      })
-      .eq('id', pedido.id);
-
     let qrCodeBase64 = campo(payment, 'QrCodeBase64Image');
     let qrCodeString = campo(payment, 'QrCodeString');
 
@@ -151,6 +142,16 @@ Deno.serve(async (req) => {
         error: 'Não foi possível gerar o QR code do PIX agora. Fale com a loja ou tente novamente em instantes.',
       }, 502);
     }
+
+    await serviceClient
+      .from('pedidos_cardapio')
+      .update({
+        forma_pagamento_online: 'pix',
+        status_pagamento: 'pendente',
+        cielo_payment_id: payment.PaymentId,
+        cielo_pix_qr: qrCodeString, // guarda o "copia e cola" pra reabrir o PIX depois em "Meus Pedidos"
+      })
+      .eq('id', pedido.id);
 
     return jsonResponse({
       success: true,

@@ -61,7 +61,7 @@ Deno.serve(async (req) => {
 
     const { data: pedido } = await serviceClient
       .from('pedidos_cardapio')
-      .select('id, empresa_id, numero_pedido, total, status_pagamento, cielo_payment_id')
+      .select('id, empresa_id, numero_pedido, total, status_pagamento, cielo_payment_id, cielo_pix_qr')
       .eq('id', pedido_id)
       .maybeSingle();
 
@@ -122,7 +122,8 @@ Deno.serve(async (req) => {
       numeroPedido: pedido.numero_pedido,
       total: pedido.total,
       qrCodeBase64: novoStatus === 'pendente' ? campo(cieloData.Payment, 'QrCodeBase64Image') : null,
-      qrCodeString: novoStatus === 'pendente' ? campo(cieloData.Payment, 'QrCodeString') : null,
+      // a consulta da Cielo nem sempre devolve o QR: nesse caso usa o código guardado na criação do PIX
+      qrCodeString: novoStatus === 'pendente' ? (campo(cieloData.Payment, 'QrCodeString') || pedido.cielo_pix_qr || null) : null,
     });
   } catch (error) {
     console.error('[cielo-verificar-pagamento] erro:', error);
