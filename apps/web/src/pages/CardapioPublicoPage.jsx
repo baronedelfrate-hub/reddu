@@ -442,9 +442,10 @@ function TelaCartaoMP({ publicKey, maxParcelas, total, pedidoId, numeroPedido, a
   );
 }
 
-// Tela do cartão de crédito (Cielo, Silent Order Post). O número, a validade e o CVV são lidos por um script DA CIELO
-// direto no navegador e enviados DIRETO pra Cielo: só um token de uso único (PaymentToken) volta pra cá e vai pra
-// função cielo-cartao-pagar, que cobra o valor gravado no pedido. Os dados do cartão nunca passam pelo Reddu.
+// Tela do cartão (Cielo): crédito e débito. O número, a validade e o CVV são lidos por scripts DA CIELO direto no
+// navegador (Silent Order Post e 3DS) e enviados DIRETO pra Cielo: só um token de uso único (PaymentToken) e o resultado
+// da autenticação 3DS voltam pra cá e vão pra função cielo-cartao-pagar, que cobra o valor gravado no pedido.
+// Os dados do cartão nunca passam pelo Reddu.
 const scriptsSop = {};
 function carregarScriptSop(url) {
   if (window.bpSop_silentOrderPost) return Promise.resolve();
@@ -459,18 +460,50 @@ function carregarScriptSop(url) {
   });
   return scriptsSop[url];
 }
+// Script do 3DS: precisa ser (re)carregado a cada autenticação, DEPOIS que o token novo já está nos campos da página.
+// Os eventos chegam em window.__bpmpiCbs, que a tela atualiza a cada tentativa.
+function carregarScript3ds(url, ambiente) {
+  return new Promise((resolve, reject) => {
+    document.querySelectorAll('script[data-mpi3ds]').forEach((n) => n.remove());
+    try { delete window.bpmpi_authenticate; } catch (e) { window.bpmpi_authenticate = undefined; }
+    const chamar = (nome) => (e) => { try { window.__bpmpiCbs?.[nome]?.(e); } catch (err) { console.error(err); } };
+    window.bpmpi_config = () => ({
+      onReady: chamar('onReady'), onSuccess: chamar('onSuccess'), onFailure: chamar('onFailure'), onUnenrolled: chamar('onUnenrolled'),
+      onDisabled: chamar('onDisabled'), onError: chamar('onError'), onUnsupportedBrand: chamar('onUnsupportedBrand'),
+      Environment: ambiente, Debug: false,
+    });
+    const limite = setTimeout(() => reject(new Error('A autenticação do cartão demorou para carregar.')), 20000);
+    window.__bpmpiCbs = { ...(window.__bpmpiCbs || {}), onReady: () => { clearTimeout(limite); resolve(); } };
+    const sc = document.createElement('script');
+    sc.src = url; sc.async = true; sc.setAttribute('data-mpi3ds', '1');
+    sc.onerror = () => { clearTimeout(limite); reject(new Error('Não foi possível carregar a autenticação do cartão.')); };
+    document.head.appendChild(sc);
+  });
+}
 const soDigitos = (v, max) => String(v || '').replace(/\D/g, '').slice(0, max);
 const agruparCartao = (d) => d.replace(/(.{4})/g, '$1 ').trim();
 const mascaraValidade = (d) => (d.length > 2 ? `${d.slice(0, 2)}/${d.slice(2)}` : d);
 const CAMPOS_SOP = { 'bp-sop-cardnumber': 'número do cartão', 'bp-sop-cardexpirationdate': 'validade', 'bp-sop-cardcvvc': 'código de segurança', 'bp-sop-cardcvv': 'código de segurança', 'bp-sop-cardholdername': 'nome no cartão' };
+// Bandeira só por prefixos bem conhecidos (vai apenas o NOME da bandeira pra Cielo, nunca o número).
+const bandeiraDoCartao = (d) => {
+  if (/^4/.test(d)) return /^(4011|4312|4389|4514|4573)/.test(d) ? null : 'Visa';
+  if (/^(5[1-5]|2[2-7])/.test(d)) return 'Master';
+  if (/^3[47]/.test(d)) return 'Amex';
+  return null;
+};
 
-function TelaCartaoCielo({ maxParcelas, total, pedidoId, numeroPedido, aguardando, formatPreco, onAprovado, onAguardando, onFechar, toast, cor }) {
+function TelaCartaoCielo({ maxParcelas, debitoAtivo, usa3dsCredito, telefone, total, pedidoId, numeroPedido, aguardando, formatPreco, onAprovado, onAguardando, onFechar, toast, cor }) {
+  const [modalidade, setModalidade] = useState('credito');
   const [nome, setNome] = useState('');
   const [numero, setNumero] = useState('');
   const [validade, setValidade] = useState('');
   const [cvv, setCvv] = useState('');
+  const [email, setEmail] = useState('');
   const [parcelas, setParcelas] = useState(1);
   const [sop, setSop] = useState(null);
+  const [mpi, setMpi] = useState(null); // { accessToken, environment, scriptUrl }
+  const [ip, setIp] = useState('');
+  const [mpiPronto, setMpiPronto] = useState(false);
   const [carregando, setCarregando] = useState(true);
   const [erroCarga, setErroCarga] = useState('');
   const [enviando, setEnviando] = useState(false);
@@ -479,15 +512,21 @@ function TelaCartaoCielo({ maxParcelas, total, pedidoId, numeroPedido, aguardand
   const callbacksRef = useRef({});
   callbacksRef.current = { onAprovado, onAguardando, toast };
 
-  // Pede um AccessToken novo do SOP (vale ~20 min e serve pra UM cartão): na abertura e depois de cada tentativa.
+  const debito = modalidade === 'debito';
+  const precisa3ds = debito || !!usa3dsCredito;
+
+  // Pede AccessTokens novos (do SOP e, se precisar, do 3DS): na abertura e depois de cada tentativa (são de uso único).
   const preparar = async () => {
-    setCarregando(true); setErroCarga('');
+    setCarregando(true); setErroCarga(''); setMpi(null); setMpiPronto(false);
     try {
-      const { data, error } = await supabase.functions.invoke('cielo-cartao-sop-token', { body: { pedido_id: pedidoId } });
+      const { data, error } = await supabase.functions.invoke('cielo-cartao-sop-token', { body: { pedido_id: pedidoId, com_3ds: precisa3ds } });
       if (error) throw new Error(await extrairErroFuncao(error));
       if (!data?.success || !data?.accessToken) throw new Error(data?.error || 'Não foi possível preparar o pagamento com cartão.');
       await carregarScriptSop(data.scriptUrl);
+      setIp(data.ip || '');
       setSop({ accessToken: data.accessToken, environment: data.environment });
+      if (precisa3ds && data.mpi?.accessToken) setMpi(data.mpi);
+      else if (debito) throw new Error('Não foi possível iniciar a autenticação do cartão. Tente de novo ou pague com PIX.');
     } catch (e) {
       setSop(null);
       setErroCarga(e.message || 'Não foi possível preparar o pagamento com cartão.');
@@ -495,16 +534,32 @@ function TelaCartaoCielo({ maxParcelas, total, pedidoId, numeroPedido, aguardand
       setCarregando(false);
     }
   };
-  useEffect(() => { if (!aguardando) preparar(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [aguardando, tentativa, pedidoId]);
+  useEffect(() => { if (!aguardando) preparar(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [aguardando, tentativa, pedidoId, modalidade]);
 
+  // Com o token do 3DS já nos campos da página, carrega o script e espera ele ficar pronto.
+  useEffect(() => {
+    if (!mpi) return undefined;
+    let cancelado = false;
+    carregarScript3ds(mpi.scriptUrl, mpi.environment)
+      .then(() => { if (!cancelado) setMpiPronto(true); })
+      .catch((e) => {
+        if (cancelado) return;
+        if (debito) setErroCarga(e.message);
+        else setMpi(null); // no crédito, segue sem 3DS
+      });
+    return () => { cancelado = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mpi]);
+
+  const digitosCartao = soDigitos(numero, 19);
   const validadeSop = (() => { // o SOP espera MM/AAAA
     const d = soDigitos(validade, 4);
     return d.length === 4 ? `${d.slice(0, 2)}/20${d.slice(2)}` : mascaraValidade(d);
   })();
+  const centavos = Math.round(Number(total) * 100);
+  const emailValido = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim());
 
-  const pagar = () => {
-    if (!sop || enviando || typeof window.bpSop_silentOrderPost !== 'function') return;
-    setEnviando(true); setErros([]);
+  const rodarSop = (autenticacao) => {
     window.bpSop_silentOrderPost({
       accessToken: sop.accessToken,
       environment: sop.environment,
@@ -512,21 +567,24 @@ function TelaCartaoCielo({ maxParcelas, total, pedidoId, numeroPedido, aguardand
       enableBinQuery: false,
       enableVerifyCard: false,
       enableTokenize: false,
-      cardType: 'creditCard',
+      cardType: debito ? 'debitCard' : 'creditCard',
       onInvalid: (lista) => {
         const msgs = (lista || []).map((r) => `${CAMPOS_SOP[r.Field] || r.Field}: ${r.Message}`);
         setErros(msgs.length ? msgs : ['Confira os dados do cartão.']);
-        setEnviando(false);
+        setEnviando(false); preparar(); // o token do 3DS (se houve) já foi usado
       },
       onError: (r) => {
         console.error('Erro no Silent Order Post:', r?.Code);
         callbacksRef.current.toast({ title: 'Não foi possível validar o cartão', description: 'Confira os dados e tente de novo.', variant: 'destructive' });
-        setEnviando(false); preparar(); // o AccessToken já foi usado: pega outro
+        setEnviando(false); preparar();
       },
       onSuccess: async (r) => {
         try {
           const { data, error } = await supabase.functions.invoke('cielo-cartao-pagar', {
-            body: { pedido_id: pedidoId, payment_token: r.PaymentToken, parcelas },
+            body: {
+              pedido_id: pedidoId, payment_token: r.PaymentToken, parcelas: debito ? 1 : parcelas,
+              tipo: debito ? 'debito' : 'credito', brand: debito ? bandeiraDoCartao(digitosCartao) : undefined, autenticacao,
+            },
           });
           if (error) throw new Error(await extrairErroFuncao(error));
           if (!data?.success) throw new Error(data?.error || 'Não foi possível processar o cartão.');
@@ -545,14 +603,39 @@ function TelaCartaoCielo({ maxParcelas, total, pedidoId, numeroPedido, aguardand
     });
   };
 
+  const pagar = () => {
+    if (!sop || enviando || typeof window.bpSop_silentOrderPost !== 'function') return;
+    setEnviando(true); setErros([]);
+    if (!precisa3ds || !mpi) { rodarSop(null); return; }
+    if (typeof window.bpmpi_authenticate !== 'function') { setEnviando(false); setErroCarga('A autenticação do cartão não carregou. Tente de novo.'); return; }
+    const parar = (titulo, descricao) => {
+      callbacksRef.current.toast({ title: titulo, description: descricao, variant: 'destructive' });
+      setEnviando(false); preparar();
+    };
+    // Sem autenticação: no crédito a compra segue (a loja assume o risco); no débito a compra não é possível.
+    const semAutenticacao = (msgDebito) => (debito ? parar('Não foi possível autenticar o cartão', msgDebito) : rodarSop(null));
+    window.__bpmpiCbs = {
+      onReady: () => {},
+      onSuccess: (e) => rodarSop({ cavv: e?.Cavv, xid: e?.Xid, eci: e?.Eci, version: e?.Version, referenceId: e?.ReferenceId }),
+      onFailure: () => parar('Autenticação não aprovada', 'O banco não confirmou a autenticação do cartão. Tente de novo, use outro cartão ou pague com PIX.'),
+      onUnenrolled: () => semAutenticacao('Esse cartão não está habilitado para compras no débito pela internet. Use o crédito ou pague com PIX.'),
+      onDisabled: () => semAutenticacao('A autenticação do cartão está indisponível. Tente o crédito ou pague com PIX.'),
+      onError: () => semAutenticacao('Não foi possível autenticar o cartão agora. Tente de novo ou pague com PIX.'),
+      onUnsupportedBrand: () => semAutenticacao('A bandeira desse cartão não aceita débito online. Use o crédito ou pague com PIX.'),
+    };
+    window.bpmpi_authenticate();
+  };
+
   const opcoesParcelas = Array.from({ length: Math.max(1, Number(maxParcelas) || 1) }, (_, i) => i + 1);
-  const prontoParaPagar = !!sop && !carregando && !enviando && nome.trim().length > 2 && soDigitos(numero, 19).length >= 13 && soDigitos(validade, 4).length === 4 && cvv.length >= 3;
+  const prontoParaPagar = !!sop && !carregando && !enviando && nome.trim().length > 2 && digitosCartao.length >= 13
+    && soDigitos(validade, 4).length === 4 && cvv.length >= 3 && (!precisa3ds || !mpi || mpiPronto) && (!debito || emailValido);
   const campo = 'w-full h-11 rounded-lg border border-gray-300 bg-white px-3 text-base focus:outline-none focus:ring-2';
+  const titulo = debito ? 'Cartão de débito' : 'Cartão de crédito';
 
   return (
     <div className="min-h-screen flex flex-col items-center bg-[#eceef1] p-4 pt-8">
       <div className="w-full max-w-md">
-        <h1 className="text-2xl font-bold text-gray-900 text-center">Pedido #{numeroPedido} — Cartão de crédito</h1>
+        <h1 className="text-2xl font-bold text-gray-900 text-center">Pedido #{numeroPedido} — {titulo}</h1>
         <p className="text-3xl font-black text-gray-900 mt-1 mb-4 text-center">{formatPreco(total)}</p>
         {aguardando ? (
           <div className="bg-white border rounded-xl p-6 text-center">
@@ -562,6 +645,20 @@ function TelaCartaoCielo({ maxParcelas, total, pedidoId, numeroPedido, aguardand
           </div>
         ) : (
           <form className="bg-white border rounded-xl p-4 space-y-3" onSubmit={(e) => { e.preventDefault(); if (prontoParaPagar) pagar(); }} autoComplete="on">
+            {debitoAtivo && (
+              <div className="grid grid-cols-2 gap-2" role="tablist" aria-label="Tipo de cartão">
+                {[['credito', 'Crédito'], ['debito', 'Débito']].map(([k, rotulo]) => (
+                  <button
+                    key={k} type="button" role="tab" aria-selected={modalidade === k} disabled={enviando}
+                    onClick={() => { if (modalidade !== k) { setModalidade(k); setErros([]); } }}
+                    className="h-10 rounded-lg border text-sm font-bold"
+                    style={modalidade === k ? { borderColor: cor, backgroundColor: `${cor}14`, color: cor } : { color: '#4b5563' }}
+                  >
+                    {rotulo}
+                  </button>
+                ))}
+              </div>
+            )}
             {carregando && !erroCarga && (
               <div className="flex items-center justify-center gap-2 py-3 text-gray-500 text-sm"><Loader2 className="h-4 w-4 animate-spin" /> Preparando pagamento seguro...</div>
             )}
@@ -576,10 +673,8 @@ function TelaCartaoCielo({ maxParcelas, total, pedidoId, numeroPedido, aguardand
               <label htmlFor="cc-numero" className="text-sm font-medium text-gray-700">Número do cartão</label>
               <input
                 id="cc-numero" className={campo} style={{ '--tw-ring-color': cor }} inputMode="numeric" autoComplete="cc-number" placeholder="0000 0000 0000 0000"
-                value={agruparCartao(soDigitos(numero, 19))} onChange={(e) => setNumero(soDigitos(e.target.value, 19))} disabled={enviando}
+                value={agruparCartao(digitosCartao)} onChange={(e) => setNumero(soDigitos(e.target.value, 19))} disabled={enviando}
               />
-              {/* O script do SOP lê estes campos pela classe: número só com dígitos e validade em MM/AAAA. */}
-              <input type="hidden" className="bp-sop-cardnumber" value={soDigitos(numero, 19)} readOnly />
             </div>
             <div>
               <label htmlFor="cc-nome" className="text-sm font-medium text-gray-700">Nome impresso no cartão</label>
@@ -595,7 +690,6 @@ function TelaCartaoCielo({ maxParcelas, total, pedidoId, numeroPedido, aguardand
                   id="cc-validade" className={campo} style={{ '--tw-ring-color': cor }} inputMode="numeric" autoComplete="cc-exp" placeholder="MM/AA"
                   value={mascaraValidade(soDigitos(validade, 4))} onChange={(e) => setValidade(soDigitos(e.target.value, 4))} disabled={enviando}
                 />
-                <input type="hidden" className="bp-sop-cardexpirationdate" value={validadeSop} readOnly />
               </div>
               <div>
                 <label htmlFor="cc-cvv" className="text-sm font-medium text-gray-700">Código de segurança</label>
@@ -605,9 +699,19 @@ function TelaCartaoCielo({ maxParcelas, total, pedidoId, numeroPedido, aguardand
                 />
               </div>
             </div>
-            <input type="hidden" className="bp-sop-cardtype" value="creditCard" readOnly />
 
-            {opcoesParcelas.length > 1 && (
+            {precisa3ds && (
+              <div>
+                <label htmlFor="cc-email" className="text-sm font-medium text-gray-700">E-mail{debito ? '' : ' (opcional)'}</label>
+                <input
+                  id="cc-email" type="email" className={campo} style={{ '--tw-ring-color': cor }} autoComplete="email" placeholder="seu@email.com"
+                  value={email} onChange={(e) => setEmail(e.target.value.trim().slice(0, 100))} disabled={enviando}
+                />
+                <p className="text-xs text-gray-400 mt-1">O banco usa o e-mail para confirmar que é você.</p>
+              </div>
+            )}
+
+            {!debito && opcoesParcelas.length > 1 && (
               <div>
                 <label htmlFor="cc-parcelas" className="text-sm font-medium text-gray-700">Parcelas</label>
                 <select id="cc-parcelas" className={campo} value={parcelas} onChange={(e) => setParcelas(Number(e.target.value))} disabled={enviando}>
@@ -618,6 +722,33 @@ function TelaCartaoCielo({ maxParcelas, total, pedidoId, numeroPedido, aguardand
               </div>
             )}
 
+            {/* Campos que os scripts da Cielo leem pela classe (nada disso é enviado ao Reddu). */}
+            <div hidden>
+              <input type="hidden" className="bp-sop-cardnumber" value={digitosCartao} readOnly />
+              <input type="hidden" className="bp-sop-cardexpirationdate" value={validadeSop} readOnly />
+              <input type="hidden" className="bp-sop-cardtype" value={debito ? 'debitCard' : 'creditCard'} readOnly />
+              {mpi && (
+                <>
+                  <input type="hidden" className="bpmpi_auth" value="true" readOnly />
+                  <input type="hidden" className="bpmpi_auth_suppresschallenge" value="false" readOnly />
+                  <input type="hidden" className="bpmpi_accesstoken" value={mpi.accessToken} readOnly />
+                  <input type="hidden" className="bpmpi_ordernumber" value={String(numeroPedido)} readOnly />
+                  <input type="hidden" className="bpmpi_currency" value="986" readOnly />
+                  <input type="hidden" className="bpmpi_totalamount" value={String(centavos)} readOnly />
+                  <input type="hidden" className="bpmpi_installments" value={String(debito ? 1 : parcelas)} readOnly />
+                  <input type="hidden" className="bpmpi_paymentmethod" value={debito ? 'debit' : 'credit'} readOnly />
+                  <input type="hidden" className="bpmpi_cardnumber" value={digitosCartao} readOnly />
+                  <input type="hidden" className="bpmpi_cardexpirationmonth" value={validadeSop.slice(0, 2)} readOnly />
+                  <input type="hidden" className="bpmpi_cardexpirationyear" value={validadeSop.slice(3)} readOnly />
+                  <input type="hidden" className="bpmpi_billto_contactname" value={nome} readOnly />
+                  <input type="hidden" className="bpmpi_billto_email" value={emailValido ? email.trim() : ''} readOnly />
+                  <input type="hidden" className="bpmpi_billto_phonenumber" value={soDigitos(telefone, 13)} readOnly />
+                  <input type="hidden" className="bpmpi_device_ipaddress" value={ip} readOnly />
+                  <input type="hidden" className="bpmpi_device_channel" value="Browser" readOnly />
+                </>
+              )}
+            </div>
+
             {erros.length > 0 && (
               <div role="alert" className="rounded-lg bg-red-50 border border-red-200 p-2.5 text-sm text-red-700 space-y-0.5">
                 {erros.map((m, i) => <p key={i}>{m}</p>)}
@@ -627,6 +758,7 @@ function TelaCartaoCielo({ maxParcelas, total, pedidoId, numeroPedido, aguardand
             <Button type="submit" disabled={!prontoParaPagar} className="w-full h-12 text-base font-bold text-white" style={{ backgroundColor: cor }}>
               {enviando ? <Loader2 className="h-5 w-5 animate-spin" /> : `Pagar ${formatPreco(total)}`}
             </Button>
+            {precisa3ds && <p className="text-xs text-gray-500 text-center">O seu banco pode pedir uma confirmação no app ou por SMS.</p>}
             <p className="text-xs text-gray-400 text-center">🔒 Pagamento seguro pela Cielo. Os dados do cartão são enviados direto para a Cielo e não passam pelo nosso site.</p>
           </form>
         )}
@@ -2429,6 +2561,9 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
     return (
       <TelaCartaoCielo
         maxParcelas={pagamentoConfigPublico.cartao_max_parcelas}
+        debitoAtivo={!!pagamentoConfigPublico.cielo_debito_ativo}
+        usa3dsCredito={!!pagamentoConfigPublico.cielo_3ds_credito}
+        telefone={form.telefone || buscaTelefone}
         total={pagamentoAtual.pedidoInfo.total}
         pedidoId={pagamentoAtual.pedidoId}
         numeroPedido={pagamentoAtual.numeroPedido}
@@ -4041,7 +4176,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                 : formaPagamento === 'cartao_online'
                 ? <><p className="font-bold">Cartão de crédito</p><p className="text-sm text-gray-500">Pague agora, direto no app</p></>
                 : formaPagamento === 'cartao_cielo'
-                ? <><p className="font-bold">Cartão de crédito</p><p className="text-sm text-gray-500">Pague agora, direto no cardápio</p></>
+                ? <><p className="font-bold">{pagamentoConfigPublico.cielo_debito_ativo ? 'Cartão de crédito ou débito' : 'Cartão de crédito'}</p><p className="text-sm text-gray-500">Pague agora, direto no cardápio</p></>
                 : formaPagamento === 'pix'
                 ? <><p className="font-bold">PIX</p><p className="text-sm text-gray-500">Pague agora, já deixa pago</p></>
                 : <><p className="font-bold">{pagamentoEntregaTipo === 'cartao' ? 'Cartão (maquininha)' : 'Dinheiro'}</p><p className="text-sm text-gray-500">Pagamento na {form.tipo_entrega === 'entrega' ? 'entrega' : 'retirada'}</p></>}
@@ -4086,8 +4221,8 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
               )}
               {cieloCartaoAtivo && (
                 <OpcaoCheckout
-                  cor={cor} icone={<CreditCard className="h-5 w-5" />} titulo="Cartão de crédito"
-                  subtitulo={Number(pagamentoConfigPublico.cartao_max_parcelas) > 1 ? `Pague agora em até ${pagamentoConfigPublico.cartao_max_parcelas}x sem juros` : 'Pague agora, direto no cardápio'}
+                  cor={cor} icone={<CreditCard className="h-5 w-5" />} titulo={pagamentoConfigPublico.cielo_debito_ativo ? 'Cartão de crédito ou débito' : 'Cartão de crédito'}
+                  subtitulo={Number(pagamentoConfigPublico.cartao_max_parcelas) > 1 ? `Pague agora, crédito em até ${pagamentoConfigPublico.cartao_max_parcelas}x sem juros` : 'Pague agora, direto no cardápio'}
                   selecionada={pagamentoEscolhido && formaPagamento === 'cartao_cielo'}
                   onClick={() => escolherPagamento('cartao_cielo')}
                   extra={cashbackAtivo ? (
