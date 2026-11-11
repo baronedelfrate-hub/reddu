@@ -383,7 +383,7 @@ export default function CardapioPagamentoPage() {
                 <div>
                   <Label className="text-gray-900">Aceitar PIX</Label>
                   {pagProvider === 'cielo' && pagCieloLinkAtivo && (
-                    <p className="text-xs text-gray-400">Com o link da Cielo ligado, o cliente vê só "Pagar online" (PIX e cartão na página da Cielo). Este PIX direto não aparece no cardápio.</p>
+                    <p className="text-xs text-gray-400">Com o link da Cielo ligado e "Aceitar PIX no link" ligado, o cliente vê só "Pagar online" e este PIX direto não aparece. Para ter PIX direto e cartão na página da Cielo juntos, desligue "Aceitar PIX no link" abaixo e deixe só o cartão ligado.</p>
                   )}
                 </div>
                 <Switch checked={pagPixAtivo} onCheckedChange={setPagPixAtivo} />

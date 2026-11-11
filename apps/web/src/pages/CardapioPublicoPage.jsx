@@ -889,7 +889,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
         if (error) throw error;
         if (data) {
           setPagamentoConfigPublico(data);
-          if (data.pagamento_obrigatorio && !modoBalcao) setFormaPagamento(data.cielo_link_ativo ? 'cielolink' : data.provider === 'infinitepay' && (data.pix_ativo || data.cartao_ativo) ? 'infinitepay' : (data.pix_ativo ? 'pix' : (data.cartao_online ? 'cartao_online' : 'pix')));
+          if (data.pagamento_obrigatorio && !modoBalcao) setFormaPagamento(data.cielo_link_ativo ? (data.cielo_link_pix === false && data.cielo_link_cartao !== false && data.pix_ativo ? 'pix' : 'cielolink') : data.provider === 'infinitepay' && (data.pix_ativo || data.cartao_ativo) ? 'infinitepay' : (data.pix_ativo ? 'pix' : (data.cartao_online ? 'cartao_online' : 'pix')));
         }
       } catch (error) {
         console.error('Erro ao carregar config de pagamento:', error);
@@ -1263,8 +1263,10 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
   const pagOnline = formaPagamento === 'pix' || formaPagamento === 'cartao_online' || formaPagamento === 'infinitepay' || formaPagamento === 'cielolink';
   const infinitePayAtivo = pagamentoConfigPublico.provider === 'infinitepay' && (!!pagamentoConfigPublico.pix_ativo || !!pagamentoConfigPublico.cartao_ativo);
   // Com o link da Cielo ligado, o PIX já é oferecido dentro de "Pagar online" (página da Cielo): o PIX direto some.
-  const pixInternoAtivo = !!pagamentoConfigPublico.pix_ativo && pagamentoConfigPublico.provider !== 'infinitepay' && !pagamentoConfigPublico.cielo_link_ativo;
   const cieloLinkAtivo = !!pagamentoConfigPublico.cielo_link_ativo;
+  // Link da Cielo só com cartão (crédito e débito na página segura da Cielo): o PIX continua direto, como opção separada.
+  const cieloLinkSoCartao = cieloLinkAtivo && pagamentoConfigPublico.cielo_link_pix === false && pagamentoConfigPublico.cielo_link_cartao !== false;
+  const pixInternoAtivo = !!pagamentoConfigPublico.pix_ativo && pagamentoConfigPublico.provider !== 'infinitepay' && (!cieloLinkAtivo || cieloLinkSoCartao);
   const onlineMulti = !!pagamentoConfigPublico.cartao_online || infinitePayAtivo || cieloLinkAtivo;
   const pagaNaEntrega = !pagOnline;
   const faixaEntregaAtual = (() => {
@@ -3805,7 +3807,9 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
               bloqueadaMsg="Escolha como receber para continuar"
               onTrocar={() => setSecaoAberta('pagamento')}
               resumo={formaPagamento === 'cielolink'
-                ? <><p className="font-bold">Pagar online</p><p className="text-sm text-gray-500">PIX ou cartão, na página segura da Cielo</p></>
+                ? (cieloLinkSoCartao
+                  ? <><p className="font-bold">Cartão de crédito ou débito</p><p className="text-sm text-gray-500">Na página segura da Cielo</p></>
+                  : <><p className="font-bold">Pagar online</p><p className="text-sm text-gray-500">PIX ou cartão, na página segura da Cielo</p></>)
                 : formaPagamento === 'infinitepay'
                 ? <><p className="font-bold">Pagar online</p><p className="text-sm text-gray-500">PIX ou cartão, na página segura da InfinitePay</p></>
                 : formaPagamento === 'cartao_online'
@@ -3816,7 +3820,9 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
             >
               {cieloLinkAtivo && (
                 <OpcaoCheckout
-                  cor={cor} icone={<Zap className="h-5 w-5" />} titulo="Pagar online" subtitulo="Pague agora, na página segura da Cielo"
+                  cor={cor} icone={cieloLinkSoCartao ? <CreditCard className="h-5 w-5" /> : <Zap className="h-5 w-5" />}
+                  titulo={cieloLinkSoCartao ? 'Cartão de crédito ou débito' : 'Pagar online'}
+                  subtitulo={cieloLinkSoCartao ? 'Pague agora, na página segura da Cielo' : 'Pague agora, na página segura da Cielo'}
                   selecionada={pagamentoEscolhido && formaPagamento === 'cielolink'}
                   onClick={() => escolherPagamento('cielolink')}
                   extra={cashbackAtivo ? (
@@ -3961,7 +3967,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
               {submitting || gerandoPix
                 ? <Loader2 className="h-4 w-4 animate-spin" />
                 : !todasEtapasOk ? 'Responda as etapas acima'
-                  : (formaPagamento === 'infinitepay' || formaPagamento === 'cielolink') ? `Pagar online · ${formatPreco(totalAPagar)}`
+                  : (formaPagamento === 'infinitepay' || formaPagamento === 'cielolink') ? `${cieloLinkSoCartao && formaPagamento === 'cielolink' ? 'Pagar com cartão' : 'Pagar online'} · ${formatPreco(totalAPagar)}`
                   : formaPagamento === 'pix' ? `Gerar PIX · ${formatPreco(totalAPagar)}`
                     : formaPagamento === 'cartao_online' ? `Pagar com cartão · ${formatPreco(totalAPagar)}`
                     : `Confirmar pedido · ${formatPreco(totalAPagar)}`}
