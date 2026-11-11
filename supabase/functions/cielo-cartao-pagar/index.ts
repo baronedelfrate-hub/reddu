@@ -18,6 +18,23 @@ const API_BASE = { sandbox: 'https://apisandbox.cieloecommerce.cielo.com.br', pr
 // Credenciais FIXAS de teste, publicadas na documentação da Cielo (só valem no sandbox, ninguém é cobrado).
 const SANDBOX = { merchantId: '832ce400-9c97-4fe7-9d4f-0928675e36cd', merchantKey: 'IIHc5F35mO9BS1FQ64ZGaqqYPG9L1OvMh2ld8kYv' };
 
+const BANDEIRAS = ['Visa', 'Master', 'Elo', 'Amex', 'Diners', 'Discover', 'JCB', 'Hipercard'];
+// ECI que indicam portador AUTENTICADO (risco de chargeback do emissor): Mastercard 01/02; Visa, Elo e Amex 05/06.
+const ECI_AUTENTICADO = ['01', '02', '05', '06'];
+const texto = (v: unknown, max: number) => (typeof v === 'string' ? v.slice(0, max) : undefined);
+
+// Resultado da autenticação 3DS que o navegador recebeu da Cielo. Aqui só repassamos; quem VALIDA o CAVV é a Cielo.
+export function lerAutenticacao(a: any) {
+  if (!a || typeof a !== 'object') return null;
+  const eci = String(a.eci ?? a.Eci ?? '').replace(/\D/g, '').padStart(2, '0').slice(-2);
+  const cavv = texto(a.cavv ?? a.Cavv, 200);
+  if (!cavv || !ECI_AUTENTICADO.includes(eci)) return null;
+  const out: Record<string, unknown> = { Cavv: cavv, Eci: Number(eci), Version: texto(a.version ?? a.Version, 10) || '2.2.0' };
+  const xid = texto(a.xid ?? a.Xid, 200); if (xid) out.Xid = xid;
+  const ref = texto(a.referenceId ?? a.ReferenceId, 40); if (ref && /^[0-9a-f-]{36}$/i.test(ref)) out.ReferenceId = ref;
+  return out;
+}
+
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Status da Cielo: 0 NotFinished, 1 Authorized, 2 PaymentConfirmed (pago), 3 Denied, 10 Voided,
@@ -43,7 +60,8 @@ export function motivoAmigavel(returnCode: unknown, returnMessage: unknown): str
 export async function handler(req: Request): Promise<Response> {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   try {
-    const { pedido_id, payment_token, parcelas } = await req.json();
+    const { pedido_id, payment_token, parcelas, tipo, brand, autenticacao } = await req.json();
+    const debito = tipo === 'debito';
     if (!pedido_id) return json({ success: false, error: 'Pedido não informado.' }, 400);
     if (typeof payment_token !== 'string' || !GUID.test(payment_token)) {
       return json({ success: false, error: 'Não foi possível ler os dados do cartão. Tente novamente.' }, 400);
@@ -59,10 +77,19 @@ export async function handler(req: Request): Promise<Response> {
     if (pedido.status_pagamento === 'pago') return json({ success: false, error: 'Esse pedido já está pago.' }, 400);
 
     const { data: config } = await svc.from('cardapio_pagamento_config')
-      .select('provider, ambiente, merchant_id, merchant_key, cielo_cartao_ativo, cartao_max_parcelas')
+      .select('provider, ambiente, merchant_id, merchant_key, cielo_cartao_ativo, cielo_debito_ativo, cartao_max_parcelas')
       .eq('empresa_id', pedido.empresa_id).maybeSingle();
     if (!config || config.provider !== 'cielo' || !config.cielo_cartao_ativo) {
       return json({ success: false, error: 'Pagamento com cartão não está configurado pra essa loja.' }, 400);
+    }
+
+    if (debito && !config.cielo_debito_ativo) {
+      return json({ success: false, error: 'Pagamento no débito não está disponível pra essa loja.' }, 400);
+    }
+    // Débito exige portador autenticado (3DS). Sem autenticação válida nem chamamos a Cielo.
+    const auth = lerAutenticacao(autenticacao);
+    if (debito && !auth) {
+      return json({ success: false, error: 'O banco não confirmou a autenticação do cartão. Tente de novo ou pague com PIX.' }, 400);
     }
 
     const ambiente = config.ambiente === 'producao' ? 'producao' : 'sandbox';
@@ -73,23 +100,26 @@ export async function handler(req: Request): Promise<Response> {
     }
 
     const maxParcelas = Math.max(1, Math.min(12, Number(config.cartao_max_parcelas) || 1));
-    const nParcelas = Math.max(1, Math.min(maxParcelas, Math.floor(Number(parcelas) || 1)));
+    const nParcelas = debito ? 1 : Math.max(1, Math.min(maxParcelas, Math.floor(Number(parcelas) || 1)));
     const centavos = Math.round(Number(pedido.total) * 100);
     if (!(centavos > 0)) return json({ success: false, error: 'Valor do pedido inválido.' }, 400);
 
     const { data: empresa } = await svc.from('empresas').select('nome').eq('id', pedido.empresa_id).maybeSingle();
     const softDescriptor = String(empresa?.nome || 'Cardapio').normalize('NFD').replace(/[^A-Za-z0-9]/g, '').slice(0, 13);
 
+    const cartao: Record<string, unknown> = { PaymentToken: payment_token };
+    if (typeof brand === 'string' && BANDEIRAS.includes(brand)) cartao.Brand = brand; // só o NOME da bandeira, nunca o cartão
     const pagamento: Record<string, unknown> = {
-      Type: 'CreditCard',
+      Type: debito ? 'DebitCard' : 'CreditCard',
       Amount: centavos,
       Currency: 'BRL',
       Country: 'BRA',
       Installments: nParcelas,
-      Capture: true,
-      Authenticate: false,
-      CreditCard: { PaymentToken: payment_token },
+      Authenticate: !!auth,
+      [debito ? 'DebitCard' : 'CreditCard']: cartao,
     };
+    if (!debito) pagamento.Capture = true;
+    if (auth) pagamento.ExternalAuthentication = auth;
     if (nParcelas > 1) pagamento.Interest = 'ByMerchant'; // a loja assume o parcelamento
     if (softDescriptor) pagamento.SoftDescriptor = softDescriptor;
     if (ambiente === 'sandbox') pagamento.Provider = 'Simulado'; // exclusivo de teste

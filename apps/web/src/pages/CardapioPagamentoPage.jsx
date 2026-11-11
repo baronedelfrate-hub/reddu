@@ -45,6 +45,13 @@ export default function CardapioPagamentoPage() {
   const [pagCieloCartaoAtivo, setPagCieloCartaoAtivo] = useState(false);
   const [pagCieloSopId, setPagCieloSopId] = useState('');
   const [pagCieloSopSecret, setPagCieloSopSecret] = useState('');
+  // Débito (exige autenticação 3DS) e 3DS opcional no crédito.
+  const [pagCieloDebitoAtivo, setPagCieloDebitoAtivo] = useState(false);
+  const [pagCielo3dsCredito, setPagCielo3dsCredito] = useState(false);
+  const [pagCielo3dsId, setPagCielo3dsId] = useState('');
+  const [pagCielo3dsSecret, setPagCielo3dsSecret] = useState('');
+  const [pagCieloEc, setPagCieloEc] = useState('');
+  const [pagCieloMcc, setPagCieloMcc] = useState('');
   const [pagSlug, setPagSlug] = useState('');
   const [savingPagamento, setSavingPagamento] = useState(false);
 
@@ -78,6 +85,12 @@ export default function CardapioPagamentoPage() {
         setPagCieloCartaoAtivo(!!data.cielo_cartao_ativo);
         setPagCieloSopId(data.cielo_sop_client_id || '');
         setPagCieloSopSecret(data.cielo_sop_client_secret || '');
+        setPagCieloDebitoAtivo(!!data.cielo_debito_ativo);
+        setPagCielo3dsCredito(!!data.cielo_3ds_credito);
+        setPagCielo3dsId(data.cielo_3ds_client_id || '');
+        setPagCielo3dsSecret(data.cielo_3ds_client_secret || '');
+        setPagCieloEc(data.cielo_ec_codigo || '');
+        setPagCieloMcc(data.cielo_mcc || '');
       }
       const { data: emp } = await supabase.from('empresas').select('cardapio_slug').eq('id', empresaId).maybeSingle();
       setPagSlug(emp?.cardapio_slug || '');
@@ -102,6 +115,15 @@ export default function CardapioPagamentoPage() {
     }
     if (pagProvider === 'cielo' && pagCieloCartaoAtivo && pagAmbiente === 'producao' && (!pagCieloSopId.trim() || !pagCieloSopSecret.trim())) {
       toast({ title: 'Preencha o Client ID e o Client Secret do Silent Order Post', description: 'Eles são gerados no site da Cielo, em Gestão API E-commerce > Microsserviços > Silent Order Post.', variant: 'destructive' });
+      return;
+    }
+    if (pagProvider === 'cielo' && pagCieloCartaoAtivo && (pagCieloDebitoAtivo || pagCielo3dsCredito) && pagAmbiente === 'producao'
+        && (!pagCielo3dsId.trim() || !pagCielo3dsSecret.trim() || !/^\d{5,10}$/.test(pagCieloEc.trim()) || !/^\d{4}$/.test(pagCieloMcc.trim()))) {
+      toast({
+        title: 'Complete os dados do 3DS',
+        description: 'Preencha o Client ID e o Client Secret do 3DS, o número do estabelecimento (EC, até 10 dígitos) e o MCC (4 dígitos).',
+        variant: 'destructive',
+      });
       return;
     }
     if (pagProvider === 'cielo' && pagCieloLinkAtivo && (!pagCieloClientId.trim() || !pagCieloClientSecret.trim())) {
@@ -147,6 +169,12 @@ export default function CardapioPagamentoPage() {
         cielo_cartao_ativo: pagProvider === 'cielo' && pagCieloCartaoAtivo,
         cielo_sop_client_id: pagProvider === 'cielo' ? (pagCieloSopId.trim() || null) : null,
         cielo_sop_client_secret: pagProvider === 'cielo' ? (pagCieloSopSecret.trim() || null) : null,
+        cielo_debito_ativo: pagProvider === 'cielo' && pagCieloCartaoAtivo && pagCieloDebitoAtivo,
+        cielo_3ds_credito: pagProvider === 'cielo' && pagCieloCartaoAtivo && pagCielo3dsCredito,
+        cielo_3ds_client_id: pagProvider === 'cielo' ? (pagCielo3dsId.trim() || null) : null,
+        cielo_3ds_client_secret: pagProvider === 'cielo' ? (pagCielo3dsSecret.trim() || null) : null,
+        cielo_ec_codigo: pagProvider === 'cielo' ? (pagCieloEc.replace(/\D/g, '') || null) : null,
+        cielo_mcc: pagProvider === 'cielo' ? (pagCieloMcc.replace(/\D/g, '') || null) : null,
         cielo_link_pix: pagCieloLinkPix,
         cielo_link_cartao: pagCieloLinkCartao,
         updated_at: new Date().toISOString(),
@@ -278,6 +306,47 @@ export default function CardapioPagamentoPage() {
                         {[2, 3, 4, 5, 6, 10, 12].map((n) => <option key={n} value={n}>Até {n}x (a loja assume o parcelamento)</option>)}
                       </select>
                     </div>
+
+                    <div className="flex items-center justify-between border rounded-lg p-3">
+                      <div>
+                        <Label className="text-gray-900">Aceitar cartão de débito</Label>
+                        <p className="text-xs text-gray-400">O débito exige a autenticação 3DS do banco (o cliente confirma no app do banco). Precisa do 3DS configurado abaixo.</p>
+                      </div>
+                      <Switch checked={pagCieloDebitoAtivo} onCheckedChange={setPagCieloDebitoAtivo} />
+                    </div>
+                    <div className="flex items-center justify-between border rounded-lg p-3">
+                      <div>
+                        <Label className="text-gray-900">Usar 3DS também no crédito</Label>
+                        <p className="text-xs text-gray-400">Com 3DS autenticado, o risco de chargeback por fraude passa para o banco emissor. Quando o cartão não é autenticável, a compra segue normalmente.</p>
+                      </div>
+                      <Switch checked={pagCielo3dsCredito} onCheckedChange={setPagCielo3dsCredito} />
+                    </div>
+                    {(pagCieloDebitoAtivo || pagCielo3dsCredito) && (
+                      <div className="border rounded-lg p-3 space-y-3 bg-gray-50">
+                        <p className="text-xs text-gray-500">
+                          No site da Cielo: <em>E-commerce → Gestão API E-commerce → Microsserviços → 3DS → Gerar chave</em>. O EC e o MCC estão em <em>Meu cadastro → Dados de cadastro</em>.
+                          {pagAmbiente === 'sandbox' ? ' No ambiente de teste, o 3DS usa as credenciais de teste da própria Cielo.' : ''}
+                        </p>
+                        <div>
+                          <Label htmlFor="pag-cielo-3ds-id" className="text-gray-900">Client ID do 3DS</Label>
+                          <Input id="pag-cielo-3ds-id" value={pagCielo3dsId} onChange={(e) => setPagCielo3dsId(e.target.value)} placeholder="Gerado no site da Cielo" autoComplete="off" />
+                        </div>
+                        <div>
+                          <Label htmlFor="pag-cielo-3ds-secret" className="text-gray-900">Client Secret do 3DS</Label>
+                          <Input id="pag-cielo-3ds-secret" type="password" value={pagCielo3dsSecret} onChange={(e) => setPagCielo3dsSecret(e.target.value)} placeholder="Gerado no site da Cielo" autoComplete="new-password" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <Label htmlFor="pag-cielo-ec" className="text-gray-900">Número do estabelecimento (EC)</Label>
+                            <Input id="pag-cielo-ec" inputMode="numeric" value={pagCieloEc} onChange={(e) => setPagCieloEc(e.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="Ex: 3004326231" />
+                          </div>
+                          <div>
+                            <Label htmlFor="pag-cielo-mcc" className="text-gray-900">MCC</Label>
+                            <Input id="pag-cielo-mcc" inputMode="numeric" value={pagCieloMcc} onChange={(e) => setPagCieloMcc(e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="4 dígitos" />
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </>
                 )}
               </div>
