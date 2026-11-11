@@ -933,8 +933,10 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
   useEffect(() => {
     if (!pagamentoAtual || (pagamentoAtual.tipo === 'cartao' && !pagamentoAtual.aguardando)) return;
     let cancelado = false;
+    let emCurso = false; // evita várias conferências ao mesmo tempo (o celular acumula os timers quando a aba fica em segundo plano)
     const intervalo = setInterval(async () => {
-      if (cancelado) return;
+      if (cancelado || emCurso || document.visibilityState === 'hidden') return;
+      emCurso = true;
       setVerificandoPagamento(true);
       try {
         const ehIP = pagamentoAtual.tipo === 'infinitepay';
@@ -964,6 +966,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
       } catch (error) {
         console.error('Erro ao verificar pagamento:', error);
       } finally {
+        emCurso = false;
         setVerificandoPagamento(false);
       }
     }, 4000);
