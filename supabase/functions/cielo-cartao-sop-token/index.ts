@@ -50,9 +50,12 @@ async function token3ds(config: any, ambiente: 'sandbox' | 'producao', nomeLoja:
     headers: { Authorization: `Basic ${btoa(`${clientId}:${clientSecret}`)}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ EstablishmentCode: ec, MerchantName: nome, MCC: mcc }),
   });
-  const d = await r.json().catch(() => null);
+  const texto = await r.text().catch(() => '');
+  let d: any = null;
+  try { d = JSON.parse(texto); } catch (_e) { /* resposta não é JSON */ }
   if (!r.ok || !d?.access_token) {
-    console.error('[cielo-cartao-sop-token] falha no token do 3DS:', r.status); // nunca loga credenciais
+    // A resposta de erro da Cielo explica o motivo (campo inválido etc.) e não tem credenciais.
+    console.error('[cielo-cartao-sop-token] falha no token do 3DS:', r.status, texto.slice(0, 300), '| nome enviado:', nome, '| EC:', ec, '| MCC:', mcc);
     return null;
   }
   return { accessToken: d.access_token as string, environment: sandbox ? 'SDB' : 'PRD', scriptUrl: MPI_SCRIPT[ambiente] };

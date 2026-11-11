@@ -143,6 +143,11 @@ export async function handler(req: Request): Promise<Response> {
     }
 
     const status = mapStatus(Number(pay.Status));
+    if (status !== 'pago') {
+      // Diagnóstico (sem dados de cartão): por que não ficou pago?
+      console.error('[cielo-cartao-pagar] não pago. Status:', pay.Status, '| ReturnCode:', pay.ReturnCode, '| ReturnMessage:', pay.ReturnMessage,
+        '| Tipo:', pagamento.Type, '| Autenticado:', !!auth, '| ChaveAutenticacaoUrl:', !!pay.AuthenticationUrl);
+    }
 
     // Confere se a Cielo cobrou o valor do pedido (nunca marca pago se o valor não bate).
     if (status === 'pago' && Number(pay.Amount) < centavos) {
