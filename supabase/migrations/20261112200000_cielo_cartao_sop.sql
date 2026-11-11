@@ -1,0 +1,38 @@
+-- Cartão de crédito dentro do cardápio, pela API E-commerce da Cielo, usando o Silent Order Post (SOP).
+-- O SOP captura número/validade/CVV no navegador e envia DIRETO pra Cielo; o nosso sistema só recebe um token
+-- temporário (PaymentToken), então os dados do cartão nunca passam pelo Reddu.
+--
+-- Só ACRESCENTA colunas. As credenciais do SOP (Client ID/Secret) ficam na mesma tabela da Merchant Key,
+-- com a mesma proteção (só a equipe da própria empresa lê; o cardápio público recebe só um booleano).
+
+alter table public.cardapio_pagamento_config
+  add column if not exists cielo_cartao_ativo boolean not null default false,
+  add column if not exists cielo_sop_client_id text,
+  add column if not exists cielo_sop_client_secret text;
+
+-- Config pública: acrescenta cielo_cartao_ativo (true só se o cartão está ligado E as credenciais existem).
+create or replace function public.rpc_get_pagamento_config_publico(p_empresa_id uuid)
+ returns jsonb
+ language sql
+ stable security definer
+ set search_path to 'public'
+as $function$
+  SELECT jsonb_build_object(
+    'provider', provider,
+    'pix_ativo', COALESCE(pix_ativo, false),
+    'cartao_ativo', COALESCE(cartao_ativo, false),
+    'pagamento_obrigatorio', COALESCE(pagamento_obrigatorio, false),
+    'cartao_online', (provider = 'mercadopago' AND COALESCE(cartao_ativo, false) AND COALESCE(public_key, '') <> ''),
+    'public_key', CASE WHEN provider = 'mercadopago' AND COALESCE(cartao_ativo, false) THEN public_key ELSE NULL END,
+    'cartao_max_parcelas', GREATEST(1, LEAST(12, COALESCE(cartao_max_parcelas, 1))),
+    'cielo_link_ativo', (provider = 'cielo' AND COALESCE(cielo_link_ativo, false)
+                          AND COALESCE(cielo_client_id, '') <> '' AND COALESCE(cielo_client_secret, '') <> ''),
+    'cielo_link_pix', COALESCE(cielo_link_pix, true),
+    'cielo_link_cartao', COALESCE(cielo_link_cartao, true),
+    'cielo_cartao_ativo', (provider = 'cielo' AND COALESCE(cielo_cartao_ativo, false)
+                          AND COALESCE(merchant_id, '') <> '' AND COALESCE(merchant_key, '') <> ''
+                          AND COALESCE(cielo_sop_client_id, '') <> '' AND COALESCE(cielo_sop_client_secret, '') <> '')
+  )
+  FROM cardapio_pagamento_config
+  WHERE empresa_id = p_empresa_id;
+$function$;

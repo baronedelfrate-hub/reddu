@@ -40,6 +40,11 @@ export default function CardapioPagamentoPage() {
   const [pagCieloClientSecret, setPagCieloClientSecret] = useState('');
   const [pagCieloLinkPix, setPagCieloLinkPix] = useState(true);
   const [pagCieloLinkCartao, setPagCieloLinkCartao] = useState(true);
+  // Cielo — cartão de crédito dentro do cardápio (API E-commerce + Silent Order Post). O cartão é digitado num
+  // campo da própria Cielo: os dados nunca passam pelo Reddu.
+  const [pagCieloCartaoAtivo, setPagCieloCartaoAtivo] = useState(false);
+  const [pagCieloSopId, setPagCieloSopId] = useState('');
+  const [pagCieloSopSecret, setPagCieloSopSecret] = useState('');
   const [pagSlug, setPagSlug] = useState('');
   const [savingPagamento, setSavingPagamento] = useState(false);
 
@@ -70,6 +75,9 @@ export default function CardapioPagamentoPage() {
         setPagCieloClientSecret(data.cielo_client_secret || '');
         setPagCieloLinkPix(data.cielo_link_pix !== false);
         setPagCieloLinkCartao(data.cielo_link_cartao !== false);
+        setPagCieloCartaoAtivo(!!data.cielo_cartao_ativo);
+        setPagCieloSopId(data.cielo_sop_client_id || '');
+        setPagCieloSopSecret(data.cielo_sop_client_secret || '');
       }
       const { data: emp } = await supabase.from('empresas').select('cardapio_slug').eq('id', empresaId).maybeSingle();
       setPagSlug(emp?.cardapio_slug || '');
@@ -86,6 +94,14 @@ export default function CardapioPagamentoPage() {
   const handleSavePagamento = async () => {
     if (pagProvider === 'cielo' && (pagPixAtivo || pagCartaoAtivo) && (!pagMerchantId.trim() || !pagMerchantKey.trim())) {
       toast({ title: 'Preencha Merchant ID e Merchant Key pra ativar o pagamento online', variant: 'destructive' });
+      return;
+    }
+    if (pagProvider === 'cielo' && pagCieloCartaoAtivo && (!pagMerchantId.trim() || !pagMerchantKey.trim())) {
+      toast({ title: 'Preencha Merchant ID e Merchant Key pra aceitar cartão', variant: 'destructive' });
+      return;
+    }
+    if (pagProvider === 'cielo' && pagCieloCartaoAtivo && pagAmbiente === 'producao' && (!pagCieloSopId.trim() || !pagCieloSopSecret.trim())) {
+      toast({ title: 'Preencha o Client ID e o Client Secret do Silent Order Post', description: 'Eles são gerados no site da Cielo, em Gestão API E-commerce > Microsserviços > Silent Order Post.', variant: 'destructive' });
       return;
     }
     if (pagProvider === 'cielo' && pagCieloLinkAtivo && (!pagCieloClientId.trim() || !pagCieloClientSecret.trim())) {
@@ -128,6 +144,9 @@ export default function CardapioPagamentoPage() {
         cielo_link_ativo: pagProvider === 'cielo' && pagCieloLinkAtivo,
         cielo_client_id: pagProvider === 'cielo' ? (pagCieloClientId.trim() || null) : null,
         cielo_client_secret: pagProvider === 'cielo' ? (pagCieloClientSecret.trim() || null) : null,
+        cielo_cartao_ativo: pagProvider === 'cielo' && pagCieloCartaoAtivo,
+        cielo_sop_client_id: pagProvider === 'cielo' ? (pagCieloSopId.trim() || null) : null,
+        cielo_sop_client_secret: pagProvider === 'cielo' ? (pagCieloSopSecret.trim() || null) : null,
         cielo_link_pix: pagCieloLinkPix,
         cielo_link_cartao: pagCieloLinkCartao,
         updated_at: new Date().toISOString(),
@@ -221,6 +240,47 @@ export default function CardapioPagamentoPage() {
                 <p className="text-xs text-gray-400 mt-1">Fica protegido — só sua equipe consegue ver/editar isso, nunca aparece pro cliente.</p>
               </div>
               <p className="text-xs text-gray-400 -mt-2">A confirmação automática do pagamento já é enviada pra Cielo junto com a cobrança — não precisa configurar nada aqui.</p>
+
+              <div className="border-t pt-4 space-y-3">
+                <div className="flex items-center justify-between border rounded-lg p-3">
+                  <div>
+                    <Label className="text-gray-900">Cartão de crédito no cardápio (API E-commerce)</Label>
+                    <p className="text-xs text-gray-400">O cliente paga com cartão dentro do cardápio, sem sair dele. O cartão é digitado em um campo seguro da Cielo (Silent Order Post): os dados nunca passam pelo Reddu.</p>
+                  </div>
+                  <Switch checked={pagCieloCartaoAtivo} onCheckedChange={setPagCieloCartaoAtivo} />
+                </div>
+                {pagCieloCartaoAtivo && (
+                  <>
+                    {pagAmbiente === 'sandbox' ? (
+                      <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg p-2">
+                        Ambiente de teste: o cartão usa as credenciais de teste da própria Cielo, ninguém é cobrado. Para aceitar cartões de verdade, mude o ambiente para Produção e preencha as credenciais abaixo.
+                      </p>
+                    ) : null}
+                    <div>
+                      <Label htmlFor="pag-cielo-sop-id" className="text-gray-900">Client ID do Silent Order Post</Label>
+                      <Input id="pag-cielo-sop-id" value={pagCieloSopId} onChange={(e) => setPagCieloSopId(e.target.value)} placeholder="Gerado no site da Cielo" autoComplete="off" />
+                    </div>
+                    <div>
+                      <Label htmlFor="pag-cielo-sop-secret" className="text-gray-900">Client Secret do Silent Order Post</Label>
+                      <Input id="pag-cielo-sop-secret" type="password" value={pagCieloSopSecret} onChange={(e) => setPagCieloSopSecret(e.target.value)} placeholder="Gerado no site da Cielo" autoComplete="new-password" />
+                      <p className="text-xs text-gray-400 mt-1">
+                        No site da Cielo: <em>E-commerce → Gestão API E-commerce → Microsserviços → Silent Order Post → Gerar chave</em>. As credenciais aparecem uma única vez.
+                        Fica protegido — só sua equipe consegue ver/editar isso, nunca aparece pro cliente.
+                      </p>
+                    </div>
+                    <div>
+                      <Label htmlFor="pag-cielo-cartao-parcelas" className="text-gray-900">Parcelamento máximo no cartão</Label>
+                      <select
+                        id="pag-cielo-cartao-parcelas" value={pagMaxParcelas} onChange={(e) => setPagMaxParcelas(Number(e.target.value))}
+                        className="mt-1 w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+                      >
+                        <option value={1}>Só à vista</option>
+                        {[2, 3, 4, 5, 6, 10, 12].map((n) => <option key={n} value={n}>Até {n}x (a loja assume o parcelamento)</option>)}
+                      </select>
+                    </div>
+                  </>
+                )}
+              </div>
 
               <div className="border-t pt-4 space-y-3">
                 <div className="flex items-center justify-between border rounded-lg p-3">
