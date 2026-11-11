@@ -442,6 +442,203 @@ function TelaCartaoMP({ publicKey, maxParcelas, total, pedidoId, numeroPedido, a
   );
 }
 
+// Tela do cartão de crédito (Cielo, Silent Order Post). O número, a validade e o CVV são lidos por um script DA CIELO
+// direto no navegador e enviados DIRETO pra Cielo: só um token de uso único (PaymentToken) volta pra cá e vai pra
+// função cielo-cartao-pagar, que cobra o valor gravado no pedido. Os dados do cartão nunca passam pelo Reddu.
+const scriptsSop = {};
+function carregarScriptSop(url) {
+  if (window.bpSop_silentOrderPost) return Promise.resolve();
+  if (scriptsSop[url]) return scriptsSop[url];
+  scriptsSop[url] = new Promise((resolve, reject) => {
+    const sc = document.createElement('script');
+    sc.src = url;
+    sc.async = true;
+    sc.onload = () => resolve();
+    sc.onerror = () => { delete scriptsSop[url]; reject(new Error('Não foi possível carregar o pagamento por cartão.')); };
+    document.head.appendChild(sc);
+  });
+  return scriptsSop[url];
+}
+const soDigitos = (v, max) => String(v || '').replace(/\D/g, '').slice(0, max);
+const agruparCartao = (d) => d.replace(/(.{4})/g, '$1 ').trim();
+const mascaraValidade = (d) => (d.length > 2 ? `${d.slice(0, 2)}/${d.slice(2)}` : d);
+const CAMPOS_SOP = { 'bp-sop-cardnumber': 'número do cartão', 'bp-sop-cardexpirationdate': 'validade', 'bp-sop-cardcvvc': 'código de segurança', 'bp-sop-cardcvv': 'código de segurança', 'bp-sop-cardholdername': 'nome no cartão' };
+
+function TelaCartaoCielo({ maxParcelas, total, pedidoId, numeroPedido, aguardando, formatPreco, onAprovado, onAguardando, onFechar, toast, cor }) {
+  const [nome, setNome] = useState('');
+  const [numero, setNumero] = useState('');
+  const [validade, setValidade] = useState('');
+  const [cvv, setCvv] = useState('');
+  const [parcelas, setParcelas] = useState(1);
+  const [sop, setSop] = useState(null);
+  const [carregando, setCarregando] = useState(true);
+  const [erroCarga, setErroCarga] = useState('');
+  const [enviando, setEnviando] = useState(false);
+  const [erros, setErros] = useState([]);
+  const [tentativa, setTentativa] = useState(0);
+  const callbacksRef = useRef({});
+  callbacksRef.current = { onAprovado, onAguardando, toast };
+
+  // Pede um AccessToken novo do SOP (vale ~20 min e serve pra UM cartão): na abertura e depois de cada tentativa.
+  const preparar = async () => {
+    setCarregando(true); setErroCarga('');
+    try {
+      const { data, error } = await supabase.functions.invoke('cielo-cartao-sop-token', { body: { pedido_id: pedidoId } });
+      if (error) throw new Error(await extrairErroFuncao(error));
+      if (!data?.success || !data?.accessToken) throw new Error(data?.error || 'Não foi possível preparar o pagamento com cartão.');
+      await carregarScriptSop(data.scriptUrl);
+      setSop({ accessToken: data.accessToken, environment: data.environment });
+    } catch (e) {
+      setSop(null);
+      setErroCarga(e.message || 'Não foi possível preparar o pagamento com cartão.');
+    } finally {
+      setCarregando(false);
+    }
+  };
+  useEffect(() => { if (!aguardando) preparar(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [aguardando, tentativa, pedidoId]);
+
+  const validadeSop = (() => { // o SOP espera MM/AAAA
+    const d = soDigitos(validade, 4);
+    return d.length === 4 ? `${d.slice(0, 2)}/20${d.slice(2)}` : mascaraValidade(d);
+  })();
+
+  const pagar = () => {
+    if (!sop || enviando || typeof window.bpSop_silentOrderPost !== 'function') return;
+    setEnviando(true); setErros([]);
+    window.bpSop_silentOrderPost({
+      accessToken: sop.accessToken,
+      environment: sop.environment,
+      language: 'PT',
+      enableBinQuery: false,
+      enableVerifyCard: false,
+      enableTokenize: false,
+      cardType: 'creditCard',
+      onInvalid: (lista) => {
+        const msgs = (lista || []).map((r) => `${CAMPOS_SOP[r.Field] || r.Field}: ${r.Message}`);
+        setErros(msgs.length ? msgs : ['Confira os dados do cartão.']);
+        setEnviando(false);
+      },
+      onError: (r) => {
+        console.error('Erro no Silent Order Post:', r?.Code);
+        callbacksRef.current.toast({ title: 'Não foi possível validar o cartão', description: 'Confira os dados e tente de novo.', variant: 'destructive' });
+        setEnviando(false); preparar(); // o AccessToken já foi usado: pega outro
+      },
+      onSuccess: async (r) => {
+        try {
+          const { data, error } = await supabase.functions.invoke('cielo-cartao-pagar', {
+            body: { pedido_id: pedidoId, payment_token: r.PaymentToken, parcelas },
+          });
+          if (error) throw new Error(await extrairErroFuncao(error));
+          if (!data?.success) throw new Error(data?.error || 'Não foi possível processar o cartão.');
+          if (data.status === 'pago') { callbacksRef.current.onAprovado(); return; }
+          if (data.status === 'falhou') {
+            callbacksRef.current.toast({ title: 'Cartão recusado', description: data.motivo || 'Tente outro cartão ou pague com PIX.', variant: 'destructive' });
+            setCvv(''); setEnviando(false); preparar();
+            return;
+          }
+          callbacksRef.current.onAguardando();
+        } catch (e) {
+          callbacksRef.current.toast({ title: 'Pagamento não concluído', description: e.message, variant: 'destructive' });
+          setEnviando(false); preparar();
+        }
+      },
+    });
+  };
+
+  const opcoesParcelas = Array.from({ length: Math.max(1, Number(maxParcelas) || 1) }, (_, i) => i + 1);
+  const prontoParaPagar = !!sop && !carregando && !enviando && nome.trim().length > 2 && soDigitos(numero, 19).length >= 13 && soDigitos(validade, 4).length === 4 && cvv.length >= 3;
+  const campo = 'w-full h-11 rounded-lg border border-gray-300 bg-white px-3 text-base focus:outline-none focus:ring-2';
+
+  return (
+    <div className="min-h-screen flex flex-col items-center bg-[#eceef1] p-4 pt-8">
+      <div className="w-full max-w-md">
+        <h1 className="text-2xl font-bold text-gray-900 text-center">Pedido #{numeroPedido} — Cartão de crédito</h1>
+        <p className="text-3xl font-black text-gray-900 mt-1 mb-4 text-center">{formatPreco(total)}</p>
+        {aguardando ? (
+          <div className="bg-white border rounded-xl p-6 text-center">
+            <Loader2 className="h-8 w-8 animate-spin text-gray-400 mx-auto" />
+            <p className="font-semibold text-gray-800 mt-3">Pagamento em análise</p>
+            <p className="text-sm text-gray-500 mt-1">O banco está analisando a compra. Assim que for aprovada, seu pedido é confirmado aqui.</p>
+          </div>
+        ) : (
+          <form className="bg-white border rounded-xl p-4 space-y-3" onSubmit={(e) => { e.preventDefault(); if (prontoParaPagar) pagar(); }} autoComplete="on">
+            {carregando && !erroCarga && (
+              <div className="flex items-center justify-center gap-2 py-3 text-gray-500 text-sm"><Loader2 className="h-4 w-4 animate-spin" /> Preparando pagamento seguro...</div>
+            )}
+            {erroCarga && (
+              <div className="text-center py-2">
+                <p className="text-red-600 text-sm">{erroCarga}</p>
+                <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => setTentativa((t) => t + 1)}>Tentar de novo</Button>
+              </div>
+            )}
+
+            <div>
+              <label htmlFor="cc-numero" className="text-sm font-medium text-gray-700">Número do cartão</label>
+              <input
+                id="cc-numero" className={campo} style={{ '--tw-ring-color': cor }} inputMode="numeric" autoComplete="cc-number" placeholder="0000 0000 0000 0000"
+                value={agruparCartao(soDigitos(numero, 19))} onChange={(e) => setNumero(soDigitos(e.target.value, 19))} disabled={enviando}
+              />
+              {/* O script do SOP lê estes campos pela classe: número só com dígitos e validade em MM/AAAA. */}
+              <input type="hidden" className="bp-sop-cardnumber" value={soDigitos(numero, 19)} readOnly />
+            </div>
+            <div>
+              <label htmlFor="cc-nome" className="text-sm font-medium text-gray-700">Nome impresso no cartão</label>
+              <input
+                id="cc-nome" className={`${campo} bp-sop-cardholdername uppercase`} style={{ '--tw-ring-color': cor }} autoComplete="cc-name" placeholder="COMO ESTÁ NO CARTÃO"
+                value={nome} onChange={(e) => setNome(e.target.value.replace(/[^A-Za-zÀ-ÿ' ]/g, '').slice(0, 50))} disabled={enviando}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="cc-validade" className="text-sm font-medium text-gray-700">Validade</label>
+                <input
+                  id="cc-validade" className={campo} style={{ '--tw-ring-color': cor }} inputMode="numeric" autoComplete="cc-exp" placeholder="MM/AA"
+                  value={mascaraValidade(soDigitos(validade, 4))} onChange={(e) => setValidade(soDigitos(e.target.value, 4))} disabled={enviando}
+                />
+                <input type="hidden" className="bp-sop-cardexpirationdate" value={validadeSop} readOnly />
+              </div>
+              <div>
+                <label htmlFor="cc-cvv" className="text-sm font-medium text-gray-700">Código de segurança</label>
+                <input
+                  id="cc-cvv" className={`${campo} bp-sop-cardcvvc bp-sop-cardcvv`} style={{ '--tw-ring-color': cor }} inputMode="numeric" autoComplete="cc-csc" placeholder="CVV" maxLength={4}
+                  value={cvv} onChange={(e) => setCvv(soDigitos(e.target.value, 4))} disabled={enviando}
+                />
+              </div>
+            </div>
+            <input type="hidden" className="bp-sop-cardtype" value="creditCard" readOnly />
+
+            {opcoesParcelas.length > 1 && (
+              <div>
+                <label htmlFor="cc-parcelas" className="text-sm font-medium text-gray-700">Parcelas</label>
+                <select id="cc-parcelas" className={campo} value={parcelas} onChange={(e) => setParcelas(Number(e.target.value))} disabled={enviando}>
+                  {opcoesParcelas.map((n) => (
+                    <option key={n} value={n}>{n === 1 ? `À vista · ${formatPreco(total)}` : `${n}x de ${formatPreco(Number(total) / n)} sem juros`}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {erros.length > 0 && (
+              <div role="alert" className="rounded-lg bg-red-50 border border-red-200 p-2.5 text-sm text-red-700 space-y-0.5">
+                {erros.map((m, i) => <p key={i}>{m}</p>)}
+              </div>
+            )}
+
+            <Button type="submit" disabled={!prontoParaPagar} className="w-full h-12 text-base font-bold text-white" style={{ backgroundColor: cor }}>
+              {enviando ? <Loader2 className="h-5 w-5 animate-spin" /> : `Pagar ${formatPreco(total)}`}
+            </Button>
+            <p className="text-xs text-gray-400 text-center">🔒 Pagamento seguro pela Cielo. Os dados do cartão são enviados direto para a Cielo e não passam pelo nosso site.</p>
+          </form>
+        )}
+        <div className="text-center">
+          <Button type="button" variant="ghost" size="sm" className="mt-4 text-gray-500" onClick={onFechar}>Fechar e pagar depois</Button>
+          <p className="text-sm text-gray-400 mt-1">O pedido já foi registrado. Você pode voltar em "Meus Pedidos" pra terminar o pagamento.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function QtdInput({ value, onCommit, className = '', campo = false, aoVivo = false }) {
   const [draft, setDraft] = useState(String(value));
   const [focado, setFocado] = useState(false);
@@ -889,7 +1086,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
         if (error) throw error;
         if (data) {
           setPagamentoConfigPublico(data);
-          if (data.pagamento_obrigatorio && !modoBalcao) setFormaPagamento(data.cielo_link_ativo ? (data.cielo_link_pix === false && data.cielo_link_cartao !== false && data.pix_ativo ? 'pix' : 'cielolink') : data.provider === 'infinitepay' && (data.pix_ativo || data.cartao_ativo) ? 'infinitepay' : (data.pix_ativo ? 'pix' : (data.cartao_online ? 'cartao_online' : 'pix')));
+          if (data.pagamento_obrigatorio && !modoBalcao) setFormaPagamento(data.cielo_link_ativo ? (data.cielo_link_pix === false && data.cielo_link_cartao !== false && data.pix_ativo ? 'pix' : 'cielolink') : data.provider === 'infinitepay' && (data.pix_ativo || data.cartao_ativo) ? 'infinitepay' : (data.pix_ativo ? 'pix' : (data.cartao_online ? 'cartao_online' : (data.cielo_cartao_ativo ? 'cartao_cielo' : 'pix'))));
         }
       } catch (error) {
         console.error('Erro ao carregar config de pagamento:', error);
@@ -933,7 +1130,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
 
   // Enquanto o QR code do PIX está na tela, confere a cada 4s se já foi pago.
   useEffect(() => {
-    if (!pagamentoAtual || (pagamentoAtual.tipo === 'cartao' && !pagamentoAtual.aguardando)) return;
+    if (!pagamentoAtual || ((pagamentoAtual.tipo === 'cartao' || pagamentoAtual.tipo === 'cartaocielo') && !pagamentoAtual.aguardando)) return;
     let cancelado = false;
     let emCurso = false; // evita várias conferências ao mesmo tempo (o celular acumula os timers quando a aba fica em segundo plano)
     const intervalo = setInterval(async () => {
@@ -1260,14 +1457,15 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
     : '';
   // Pagando na entrega: quando o cliente escolhe CARTÃO e a faixa de distância tem "taxa de retorno"
   // cadastrada (motoboy volta com a maquininha), essa taxa substitui a taxa de entrega normal.
-  const pagOnline = formaPagamento === 'pix' || formaPagamento === 'cartao_online' || formaPagamento === 'infinitepay' || formaPagamento === 'cielolink';
+  const pagOnline = formaPagamento === 'pix' || formaPagamento === 'cartao_online' || formaPagamento === 'infinitepay' || formaPagamento === 'cielolink' || formaPagamento === 'cartao_cielo';
   const infinitePayAtivo = pagamentoConfigPublico.provider === 'infinitepay' && (!!pagamentoConfigPublico.pix_ativo || !!pagamentoConfigPublico.cartao_ativo);
   // Com o link da Cielo ligado, o PIX já é oferecido dentro de "Pagar online" (página da Cielo): o PIX direto some.
   const cieloLinkAtivo = !!pagamentoConfigPublico.cielo_link_ativo;
+  const cieloCartaoAtivo = !!pagamentoConfigPublico.cielo_cartao_ativo; // cartão dentro do cardápio (API E-commerce + SOP)
   // Link da Cielo só com cartão (crédito e débito na página segura da Cielo): o PIX continua direto, como opção separada.
   const cieloLinkSoCartao = cieloLinkAtivo && pagamentoConfigPublico.cielo_link_pix === false && pagamentoConfigPublico.cielo_link_cartao !== false;
   const pixInternoAtivo = !!pagamentoConfigPublico.pix_ativo && pagamentoConfigPublico.provider !== 'infinitepay' && (!cieloLinkAtivo || cieloLinkSoCartao);
-  const onlineMulti = !!pagamentoConfigPublico.cartao_online || infinitePayAtivo || cieloLinkAtivo;
+  const onlineMulti = !!pagamentoConfigPublico.cartao_online || infinitePayAtivo || cieloLinkAtivo || cieloCartaoAtivo;
   const pagaNaEntrega = !pagOnline;
   const faixaEntregaAtual = (() => {
     const tabela = empresa?.cardapio_config?.taxa_entrega?.tabela;
@@ -1811,6 +2009,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
     else if (tipo === 'cartao_online') setFormaPagamento('cartao_online');
     else if (tipo === 'infinitepay') setFormaPagamento('infinitepay');
     else if (tipo === 'cielolink') setFormaPagamento('cielolink');
+    else if (tipo === 'cartao_cielo') setFormaPagamento('cartao_cielo');
     else { setFormaPagamento('entrega'); setPagamentoEntregaTipo(tipo); }
     setPagamentoEscolhido(true); setSecaoAberta(null);
   };
@@ -2141,6 +2340,11 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
           tipo: 'cartao', aguardando: false,
           pedidoId: data.id, numeroPedido: data.numero_pedido, pedidoInfo,
         });
+      } else if (formaPagamento === 'cartao_cielo') {
+        setPagamentoAtual({
+          tipo: 'cartaocielo', aguardando: false,
+          pedidoId: data.id, numeroPedido: data.numero_pedido, pedidoInfo,
+        });
       } else {
         setPedidoConfirmado(pedidoInfo);
       }
@@ -2218,6 +2422,28 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
           O pedido já foi registrado. Se você já pagou, a confirmação chega sozinha.
         </p>
       </div>
+    );
+  }
+
+  if (pagamentoAtual?.tipo === 'cartaocielo') {
+    return (
+      <TelaCartaoCielo
+        maxParcelas={pagamentoConfigPublico.cartao_max_parcelas}
+        total={pagamentoAtual.pedidoInfo.total}
+        pedidoId={pagamentoAtual.pedidoId}
+        numeroPedido={pagamentoAtual.numeroPedido}
+        aguardando={!!pagamentoAtual.aguardando}
+        formatPreco={formatPreco}
+        toast={toast}
+        cor={corCapa || '#dc2626'}
+        onAprovado={() => {
+          supabase.functions.invoke('enviar-confirmacao-pedido', { body: { pedido_id: pagamentoAtual.pedidoId } })
+            .catch((e) => console.error('Erro ao notificar pedido por WhatsApp:', e));
+          setPedidoConfirmado(pagamentoAtual.pedidoInfo); setPagamentoAtual(null);
+        }}
+        onAguardando={() => setPagamentoAtual((p) => (p ? { ...p, aguardando: true } : p))}
+        onFechar={() => { setPagamentoAtual(null); setViewAtual('pedidos'); handleBuscarPedidos(); }}
+      />
     );
   }
 
@@ -2984,10 +3210,10 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
 
                       <p className="font-bold text-gray-900 mt-2">{formatPreco(pedido.total)}</p>
 
-                      {pedido.status !== 'CANCELADO' && pedido.forma_pagamento_online === 'cartao' && ['pendente', 'falhou'].includes(pedido.status_pagamento) && pagamentoConfigPublico.cartao_online && (
+                      {pedido.status !== 'CANCELADO' && pedido.forma_pagamento_online === 'cartao' && ['pendente', 'falhou'].includes(pedido.status_pagamento) && (pagamentoConfigPublico.cartao_online || cieloCartaoAtivo) && (
                         <Button
                           size="sm" className="w-full mt-2 bg-amber-500 hover:bg-amber-600"
-                          onClick={() => setPagamentoAtual({ tipo: 'cartao', aguardando: false, pedidoId: pedido.id, numeroPedido: pedido.numero_pedido, pedidoInfo: { total: pedido.total } })}
+                          onClick={() => setPagamentoAtual({ tipo: cieloCartaoAtivo ? 'cartaocielo' : 'cartao', aguardando: false, pedidoId: pedido.id, numeroPedido: pedido.numero_pedido, pedidoInfo: { total: pedido.total } })}
                         >
                           Pagar agora (cartão)
                         </Button>
@@ -3814,6 +4040,8 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                 ? <><p className="font-bold">Pagar online</p><p className="text-sm text-gray-500">PIX ou cartão, na página segura da InfinitePay</p></>
                 : formaPagamento === 'cartao_online'
                 ? <><p className="font-bold">Cartão de crédito</p><p className="text-sm text-gray-500">Pague agora, direto no app</p></>
+                : formaPagamento === 'cartao_cielo'
+                ? <><p className="font-bold">Cartão de crédito</p><p className="text-sm text-gray-500">Pague agora, direto no cardápio</p></>
                 : formaPagamento === 'pix'
                 ? <><p className="font-bold">PIX</p><p className="text-sm text-gray-500">Pague agora, já deixa pago</p></>
                 : <><p className="font-bold">{pagamentoEntregaTipo === 'cartao' ? 'Cartão (maquininha)' : 'Dinheiro'}</p><p className="text-sm text-gray-500">Pagamento na {form.tipo_entrega === 'entrega' ? 'entrega' : 'retirada'}</p></>}
@@ -3856,6 +4084,19 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                   ) : null}
                 />
               )}
+              {cieloCartaoAtivo && (
+                <OpcaoCheckout
+                  cor={cor} icone={<CreditCard className="h-5 w-5" />} titulo="Cartão de crédito"
+                  subtitulo={Number(pagamentoConfigPublico.cartao_max_parcelas) > 1 ? `Pague agora em até ${pagamentoConfigPublico.cartao_max_parcelas}x sem juros` : 'Pague agora, direto no cardápio'}
+                  selecionada={pagamentoEscolhido && formaPagamento === 'cartao_cielo'}
+                  onClick={() => escolherPagamento('cartao_cielo')}
+                  extra={cashbackAtivo ? (
+                    <span className="inline-flex items-center gap-1 mt-1 text-xs font-bold px-2 py-0.5 rounded-md bg-green-100 text-green-800">
+                      <Coins className="h-3 w-3" />{Number(cashbackInfo.percentual)}% de cashback
+                    </span>
+                  ) : null}
+                />
+              )}
               {pagamentoConfigPublico.cartao_online && (
                 <OpcaoCheckout
                   cor={cor} icone={<CreditCard className="h-5 w-5" />} titulo="Cartão de crédito" subtitulo={Number(pagamentoConfigPublico.cartao_max_parcelas) > 1 ? `Pague agora em até ${pagamentoConfigPublico.cartao_max_parcelas}x` : 'Pague agora, direto no app'}
@@ -3868,7 +4109,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                   ) : null}
                 />
               )}
-              {(!pagamentoConfigPublico.pagamento_obrigatorio || (!pixInternoAtivo && !pagamentoConfigPublico.cartao_online && !infinitePayAtivo && !cieloLinkAtivo)) && (
+              {(!pagamentoConfigPublico.pagamento_obrigatorio || (!pixInternoAtivo && !pagamentoConfigPublico.cartao_online && !infinitePayAtivo && !cieloLinkAtivo && !cieloCartaoAtivo)) && (
                 <>
                   <OpcaoCheckout
                     cor={cor} icone={<CreditCard className="h-5 w-5" />} titulo="Dinheiro" subtitulo={`Pagar na ${form.tipo_entrega === 'entrega' ? 'entrega' : 'retirada'}`}
@@ -3969,7 +4210,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                 : !todasEtapasOk ? 'Responda as etapas acima'
                   : (formaPagamento === 'infinitepay' || formaPagamento === 'cielolink') ? `${cieloLinkSoCartao && formaPagamento === 'cielolink' ? 'Pagar com cartão' : 'Pagar online'} · ${formatPreco(totalAPagar)}`
                   : formaPagamento === 'pix' ? `Gerar PIX · ${formatPreco(totalAPagar)}`
-                    : formaPagamento === 'cartao_online' ? `Pagar com cartão · ${formatPreco(totalAPagar)}`
+                    : (formaPagamento === 'cartao_online' || formaPagamento === 'cartao_cielo') ? `Pagar com cartão · ${formatPreco(totalAPagar)}`
                     : `Confirmar pedido · ${formatPreco(totalAPagar)}`}
             </Button>
           </DialogFooter>
