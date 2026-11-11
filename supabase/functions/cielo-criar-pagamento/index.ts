@@ -38,6 +38,10 @@ const API_BASE = {
   sandbox: 'https://apisandbox.cieloecommerce.cielo.com.br',
   producao: 'https://api.cieloecommerce.cielo.com.br',
 };
+const API_QUERY_BASE = {
+  sandbox: 'https://apiquerysandbox.cieloecommerce.cielo.com.br',
+  producao: 'https://apiquery.cieloecommerce.cielo.com.br',
+};
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -115,11 +119,37 @@ Deno.serve(async (req) => {
       })
       .eq('id', pedido.id);
 
-    const qrCodeBase64 = campo(payment, 'QrCodeBase64Image');
-    const qrCodeString = campo(payment, 'QrCodeString');
+    let qrCodeBase64 = campo(payment, 'QrCodeBase64Image');
+    let qrCodeString = campo(payment, 'QrCodeString');
+
     if (!qrCodeBase64 && !qrCodeString) {
-      // só os NOMES dos campos (sem valores), pra descobrir o que a Cielo mandou
-      console.error('[cielo-criar-pagamento] resposta sem QR code. Campos:', Object.keys(payment).join(','));
+      // Sem QR na resposta da criação: registra o diagnóstico (sem dados sensíveis) e consulta a venda
+      // na API de consulta, que às vezes já traz o QR code.
+      console.error('[cielo-criar-pagamento] criação sem QR code. Campos:', Object.keys(payment).join(','),
+        '| Status:', payment.Status, '| ReturnCode:', payment.ReturnCode, '| ReturnMessage:', payment.ReturnMessage, '| Provider:', payment.Provider);
+      try {
+        const queryBase = API_QUERY_BASE[config.ambiente] || API_QUERY_BASE.sandbox;
+        const consulta = await fetch(`${queryBase}/1/sales/${payment.PaymentId}`, {
+          headers: { MerchantId: config.merchant_id, MerchantKey: config.merchant_key },
+        });
+        const dadosConsulta = await consulta.json().catch(() => null);
+        const p2 = dadosConsulta?.Payment;
+        qrCodeBase64 = campo(p2, 'QrCodeBase64Image');
+        qrCodeString = campo(p2, 'QrCodeString');
+        if (!qrCodeBase64 && !qrCodeString) {
+          console.error('[cielo-criar-pagamento] consulta também sem QR code. HTTP:', consulta.status,
+            '| Campos:', p2 ? Object.keys(p2).join(',') : '(sem Payment)', '| Status:', p2?.Status, '| ReturnMessage:', p2?.ReturnMessage);
+        }
+      } catch (e) {
+        console.error('[cielo-criar-pagamento] erro na consulta do QR code:', e);
+      }
+    }
+
+    if (!qrCodeBase64 && !qrCodeString) {
+      return jsonResponse({
+        success: false,
+        error: 'Não foi possível gerar o QR code do PIX agora. Fale com a loja ou tente novamente em instantes.',
+      }, 502);
     }
 
     return jsonResponse({
