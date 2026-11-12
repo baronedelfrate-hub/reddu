@@ -498,7 +498,7 @@ const bandeiraDoCartao = (d) => {
   return null;
 };
 
-function TelaCartaoCielo({ maxParcelas, debitoAtivo, usa3dsCredito, telefone, total, pedidoId, numeroPedido, aguardando, formatPreco, onAprovado, onAguardando, onFechar, toast, cor }) {
+function TelaCartaoCielo({ maxParcelas, debitoAtivo, usa3dsCredito, telefone, total, cashbackGanho, pixDisponivel, trocandoParaPix, onPagarComPix, pedidoId, numeroPedido, aguardando, formatPreco, onAprovado, onAguardando, onFechar, toast, cor }) {
   const [modalidade, setModalidade] = useState('credito');
   const [nome, setNome] = useState('');
   const [numero, setNumero] = useState('');
@@ -645,7 +645,13 @@ function TelaCartaoCielo({ maxParcelas, debitoAtivo, usa3dsCredito, telefone, to
     <div className="min-h-screen flex flex-col items-center bg-[#eceef1] p-4 pt-8">
       <div className="w-full max-w-md">
         <h1 className="text-2xl font-bold text-gray-900 text-center">Pedido #{numeroPedido} — {titulo}</h1>
-        <p className="text-3xl font-black text-gray-900 mt-1 mb-4 text-center">{formatPreco(total)}</p>
+        <p className="text-3xl font-black text-gray-900 mt-1 mb-1 text-center">{formatPreco(total)}</p>
+        {Number(cashbackGanho) > 0 && (
+          <p className="text-sm text-green-700 flex items-center justify-center gap-1 mb-3">
+            <Coins className="h-4 w-4" /> Você vai ganhar {formatPreco(cashbackGanho)} de cashback neste pedido
+          </p>
+        )}
+        <div className="mb-3" />
         {aguardando ? (
           <div className="bg-white border rounded-xl p-6 text-center">
             <Loader2 className="h-8 w-8 animate-spin text-gray-400 mx-auto" />
@@ -769,6 +775,14 @@ function TelaCartaoCielo({ maxParcelas, debitoAtivo, usa3dsCredito, telefone, to
             {precisa3ds && <p className="text-xs text-gray-500 text-center">O seu banco pode pedir uma confirmação no app ou por SMS.</p>}
             <p className="text-xs text-gray-400 text-center">🔒 Pagamento seguro pela Cielo. Os dados do cartão são enviados direto para a Cielo e não passam pelo nosso site.</p>
           </form>
+        )}
+        {!aguardando && pixDisponivel && (
+          <div className="mt-3 rounded-xl border bg-white p-3 text-center">
+            <p className="text-sm text-gray-600">Prefere pagar com PIX? É o mesmo pedido e o mesmo valor.</p>
+            <Button type="button" variant="outline" className="w-full mt-2 font-bold" disabled={enviando || trocandoParaPix} onClick={onPagarComPix} style={{ borderColor: cor, color: cor }}>
+              {trocandoParaPix ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Pagar com PIX'}
+            </Button>
+          </div>
         )}
         <div className="text-center">
           <Button type="button" variant="ghost" size="sm" className="mt-4 text-gray-500" onClick={onFechar}>Fechar e pagar depois</Button>
@@ -992,6 +1006,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
   const [pagamentoEntregaTipo, setPagamentoEntregaTipo] = useState('dinheiro'); // 'dinheiro' | 'cartao' (quando paga na entrega/retirada)
   const [trocoPara, setTrocoPara] = useState('');
   const [pixCopiado, setPixCopiado] = useState(false);
+  const [trocandoParaPix, setTrocandoParaPix] = useState(false);
   const [pagamentoAtual, setPagamentoAtual] = useState(null); // { pedidoId, numeroPedido, qrCodeBase64, qrCodeString }
   useEffect(() => { if (pagamentoAtual) window.scrollTo(0, 0); }, [!!pagamentoAtual]); // abre a tela do PIX sempre no topo
   const [retomandoPagamentoId, setRetomandoPagamentoId] = useState(null);
@@ -1913,6 +1928,28 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
   // pendente (ex: cliente fechou a aba sem terminar de pagar). Chama a
   // mesma função de verificação, que devolve o QR code de novo enquanto o
   // pagamento ainda não caiu.
+  // Cliente que não conseguiu pagar no cartão (ou desistiu) troca o MESMO pedido para PIX: gera a cobrança PIX e abre a tela do QR.
+  const trocarParaPix = async (pedido) => {
+    if (trocandoParaPix) return;
+    setTrocandoParaPix(true);
+    try {
+      const funcaoCriar = pagamentoConfigPublico.provider === 'mercadopago' ? 'mercadopago-criar-pagamento' : 'cielo-criar-pagamento';
+      const { data: pixData, error: pixError } = await supabase.functions.invoke(funcaoCriar, { body: { pedido_id: pedido.id } });
+      if (pixError || !pixData?.success) throw new Error(pixData?.error || (pixError ? await extrairErroFuncao(pixError) : null) || 'Falha ao gerar PIX');
+      setPagamentoAtual({
+        pedidoId: pedido.id,
+        numeroPedido: pedido.numero_pedido ?? pedido.numeroPedido,
+        qrCodeBase64: pixData.qrCodeBase64,
+        qrCodeString: pixData.qrCodeString,
+        pedidoInfo: { id: pedido.id, numeroPedido: pedido.numero_pedido ?? pedido.numeroPedido, total: pedido.total },
+      });
+    } catch (e) {
+      toast({ title: 'Não foi possível gerar o PIX', description: e.message, variant: 'destructive' });
+    } finally {
+      setTrocandoParaPix(false);
+    }
+  };
+
   const handleRetomarPagamento = async (pedido) => {
     if (pedido.status === 'CANCELADO') {
       toast({ title: 'Esse pedido foi cancelado', description: 'Não é possível pagar um pedido cancelado.', variant: 'destructive' });
@@ -2394,6 +2431,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
         id: data.id,
         numeroPedido: data.numero_pedido,
         total: totalFinalPedido,
+        cashbackGanho: pagOnline ? cashbackGanhoPrevisto : 0,
         dataAgendamento: form.quando === 'agendar' ? form.dataAgendamento : null,
         previsao: form.quando === 'agora' && temPrevisao ? previsaoAtual : null,
       };
@@ -2573,6 +2611,10 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
         usa3dsCredito={!!pagamentoConfigPublico.cielo_3ds_credito}
         telefone={form.telefone || buscaTelefone}
         total={pagamentoAtual.pedidoInfo.total}
+        cashbackGanho={pagamentoAtual.pedidoInfo.cashbackGanho}
+        pixDisponivel={pixInternoAtivo}
+        trocandoParaPix={trocandoParaPix}
+        onPagarComPix={() => trocarParaPix({ id: pagamentoAtual.pedidoId, numero_pedido: pagamentoAtual.numeroPedido, total: pagamentoAtual.pedidoInfo.total })}
         pedidoId={pagamentoAtual.pedidoId}
         numeroPedido={pagamentoAtual.numeroPedido}
         aguardando={!!pagamentoAtual.aguardando}
@@ -3359,6 +3401,14 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                           onClick={() => setPagamentoAtual({ tipo: cieloCartaoAtivo ? 'cartaocielo' : 'cartao', aguardando: false, pedidoId: pedido.id, numeroPedido: pedido.numero_pedido, pedidoInfo: { total: pedido.total } })}
                         >
                           Pagar agora (cartão)
+                        </Button>
+                      )}
+                      {pedido.status !== 'CANCELADO' && pedido.forma_pagamento_online === 'cartao' && ['pendente', 'falhou'].includes(pedido.status_pagamento) && pixInternoAtivo && (
+                        <Button
+                          size="sm" variant="outline" className="w-full mt-2" disabled={trocandoParaPix}
+                          onClick={() => trocarParaPix(pedido)}
+                        >
+                          {trocandoParaPix ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Pagar com PIX'}
                         </Button>
                       )}
                       {pedido.status !== 'CANCELADO' && pedido.forma_pagamento_online === 'pix' && pedido.status_pagamento === 'pendente' && (
