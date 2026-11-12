@@ -590,7 +590,10 @@ function TelaCartaoCielo({ maxParcelas, debitoAtivo, usa3dsCredito, telefone, to
           if (!data?.success) throw new Error(data?.error || 'Não foi possível processar o cartão.');
           if (data.status === 'pago') { callbacksRef.current.onAprovado(); return; }
           if (data.status === 'falhou') {
-            callbacksRef.current.toast({ title: 'Cartão recusado', description: data.motivo || 'Tente outro cartão ou pague com PIX.', variant: 'destructive' });
+            callbacksRef.current.toast({
+              title: data.indisponivel ? 'Cartão indisponível no momento' : 'Cartão recusado',
+              description: data.motivo || 'Tente outro cartão ou pague com PIX.', variant: 'destructive',
+            });
             setCvv(''); setEnviando(false); preparar();
             return;
           }

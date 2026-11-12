@@ -45,6 +45,15 @@ export function mapStatus(s: number): 'pago' | 'falhou' | 'pendente' {
   return 'pendente';
 }
 
+// A Cielo às vezes devolve "pendente" (status 0 ou 12) JUNTO com um código de erro de configuração (ex.: 002
+// "Credenciais Inválidas"). Isso não é "em análise": a cobrança não vai andar. Sem código ou com código de sucesso,
+// continua pendente de verdade (ex.: aguardando o banco).
+const CODIGOS_OK = ['', '0', '00', '4', '04', '6', '06'];
+export function pendenteComErro(status: number, returnCode: unknown): boolean {
+  return [0, 12].includes(status) && !CODIGOS_OK.includes(String(returnCode ?? '').trim());
+}
+const MSG_INDISPONIVEL = 'O pagamento no cartão está indisponível no momento. Faça o pedido de novo pagando com PIX ou fale com a loja.';
+
 // Mensagem pro cliente: curta e sem detalhe técnico.
 export function motivoAmigavel(returnCode: unknown, returnMessage: unknown): string {
   const c = String(returnCode ?? '');
@@ -142,7 +151,8 @@ export async function handler(req: Request): Promise<Response> {
       return json({ success: false, error: 'Não foi possível processar o cartão agora. Tente novamente.' }, 502);
     }
 
-    const status = mapStatus(Number(pay.Status));
+    const indisponivel = pendenteComErro(Number(pay.Status), pay.ReturnCode);
+    const status = indisponivel ? 'falhou' : mapStatus(Number(pay.Status));
     if (status !== 'pago') {
       // Diagnóstico (sem dados de cartão): por que não ficou pago?
       console.error('[cielo-cartao-pagar] não pago. Status:', pay.Status, '| ReturnCode:', pay.ReturnCode, '| ReturnMessage:', pay.ReturnMessage,
@@ -163,6 +173,7 @@ export async function handler(req: Request): Promise<Response> {
     }).eq('id', pedido.id).neq('status_pagamento', 'pago');
 
     if (status === 'falhou') {
+      if (indisponivel) return json({ success: true, status, indisponivel: true, motivo: MSG_INDISPONIVEL });
       return json({ success: true, status, motivo: motivoAmigavel(pay.ReturnCode, pay.ReturnMessage) });
     }
     return json({ success: true, status, numeroPedido: pedido.numero_pedido, total: pedido.total });
