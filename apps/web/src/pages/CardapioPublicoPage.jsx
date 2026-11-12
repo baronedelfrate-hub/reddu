@@ -487,6 +487,13 @@ function carregarScript3ds(url, ambiente, token) {
   });
 }
 const soDigitos = (v, max) => String(v || '').replace(/\D/g, '').slice(0, max);
+const cpfOk = (v) => {
+  const d = soDigitos(v, 11);
+  if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false;
+  const dig = (n) => { let t = 0; for (let i = 0; i < n; i += 1) t += Number(d[i]) * (n + 1 - i); const r = (t * 10) % 11; return r === 10 ? 0 : r; };
+  return dig(9) === Number(d[9]) && dig(10) === Number(d[10]);
+};
+const mascaraCpf = (d) => d.replace(/^(\d{3})(\d)/, '$1.$2').replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3').replace(/\.(\d{3})(\d)/, '.$1-$2');
 const agruparCartao = (d) => d.replace(/(.{4})/g, '$1 ').trim();
 const mascaraValidade = (d) => (d.length > 2 ? `${d.slice(0, 2)}/${d.slice(2)}` : d);
 const CAMPOS_SOP = { 'bp-sop-cardnumber': 'número do cartão', 'bp-sop-cardexpirationdate': 'validade', 'bp-sop-cardcvvc': 'código de segurança', 'bp-sop-cardcvv': 'código de segurança', 'bp-sop-cardholdername': 'nome no cartão' };
@@ -505,6 +512,7 @@ function TelaCartaoCielo({ maxParcelas, debitoAtivo, usa3dsCredito, telefone, to
   const [validade, setValidade] = useState('');
   const [cvv, setCvv] = useState('');
   const [email, setEmail] = useState('');
+  const [cpf, setCpf] = useState('');
   const [parcelas, setParcelas] = useState(1);
   const [sop, setSop] = useState(null);
   const [mpi, setMpi] = useState(null); // { accessToken, environment, scriptUrl }
@@ -590,6 +598,7 @@ function TelaCartaoCielo({ maxParcelas, debitoAtivo, usa3dsCredito, telefone, to
             body: {
               pedido_id: pedidoId, payment_token: r.PaymentToken, parcelas: debito ? 1 : parcelas,
               tipo: debito ? 'debito' : 'credito', brand: debito ? bandeiraDoCartao(digitosCartao) : undefined, autenticacao,
+              cpf: cpfOk(cpf) ? soDigitos(cpf, 11) : undefined,
             },
           });
           if (error) throw new Error(await extrairErroFuncao(error));
@@ -637,7 +646,7 @@ function TelaCartaoCielo({ maxParcelas, debitoAtivo, usa3dsCredito, telefone, to
 
   const opcoesParcelas = Array.from({ length: Math.max(1, Number(maxParcelas) || 1) }, (_, i) => i + 1);
   const prontoParaPagar = !!sop && !carregando && !enviando && nome.trim().length > 2 && digitosCartao.length >= 13
-    && soDigitos(validade, 4).length === 4 && cvv.length >= 3 && (!precisa3ds || !mpi || mpiPronto) && (!debito || emailValido);
+    && soDigitos(validade, 4).length === 4 && cvv.length >= 3 && (!precisa3ds || !mpi || mpiPronto) && (!debito || emailValido) && (cpf === '' || cpfOk(cpf));
   const campo = 'w-full h-11 rounded-lg border border-gray-300 bg-white px-3 text-base focus:outline-none focus:ring-2';
   const titulo = debito ? 'Cartão de débito' : 'Cartão de crédito';
 
@@ -713,6 +722,17 @@ function TelaCartaoCielo({ maxParcelas, debitoAtivo, usa3dsCredito, telefone, to
                   value={cvv} onChange={(e) => setCvv(soDigitos(e.target.value, 4))} disabled={enviando}
                 />
               </div>
+            </div>
+
+            <div>
+              <label htmlFor="cc-cpf" className="text-sm font-medium text-gray-700">CPF (opcional)</label>
+              <input
+                id="cc-cpf" className={campo} style={{ '--tw-ring-color': cor }} inputMode="numeric" autoComplete="off" placeholder="000.000.000-00"
+                value={mascaraCpf(soDigitos(cpf, 11))} onChange={(e) => setCpf(soDigitos(e.target.value, 11))} disabled={enviando}
+              />
+              {soDigitos(cpf, 11).length === 11 && !cpfOk(cpf) && <p role="alert" className="text-xs text-red-600 mt-1">CPF inválido. Confira os números ou apague o campo.</p>}
+              {soDigitos(cpf, 11).length > 0 && soDigitos(cpf, 11).length < 11 && <p role="alert" className="text-xs text-amber-700 mt-1">CPF incompleto. Complete os 11 números ou apague o campo.</p>}
+              {soDigitos(cpf, 11).length === 0 && <p className="text-xs text-gray-400 mt-1">Ajuda o banco a aprovar a compra.</p>}
             </div>
 
             {precisa3ds && (

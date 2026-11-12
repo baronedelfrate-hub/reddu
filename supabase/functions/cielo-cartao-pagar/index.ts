@@ -23,6 +23,19 @@ const BANDEIRAS = ['Visa', 'Master', 'Elo', 'Amex', 'Diners', 'Discover', 'JCB',
 const ECI_AUTENTICADO = ['01', '02', '05', '06'];
 const texto = (v: unknown, max: number) => (typeof v === 'string' ? v.slice(0, max) : undefined);
 
+// CPF opcional do comprador (a Cielo pode exigir o documento do comprador em algumas contas). Só vai pra Cielo se for válido.
+export function cpfValido(v: unknown): string | null {
+  const d = String(v ?? '').replace(/\D/g, '');
+  if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return null;
+  const digito = (n: number) => {
+    let soma = 0;
+    for (let i = 0; i < n; i++) soma += Number(d[i]) * (n + 1 - i);
+    const r = (soma * 10) % 11;
+    return r === 10 ? 0 : r;
+  };
+  return digito(9) === Number(d[9]) && digito(10) === Number(d[10]) ? d : null;
+}
+
 // Resultado da autenticação 3DS que o navegador recebeu da Cielo. Aqui só repassamos; quem VALIDA o CAVV é a Cielo.
 export function lerAutenticacao(a: any) {
   if (!a || typeof a !== 'object') return null;
@@ -69,7 +82,7 @@ export function motivoAmigavel(returnCode: unknown, returnMessage: unknown): str
 export async function handler(req: Request): Promise<Response> {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   try {
-    const { pedido_id, payment_token, parcelas, tipo, brand, autenticacao } = await req.json();
+    const { pedido_id, payment_token, parcelas, tipo, brand, autenticacao, cpf } = await req.json();
     const debito = tipo === 'debito';
     if (!pedido_id) return json({ success: false, error: 'Pedido não informado.' }, 400);
     if (typeof payment_token !== 'string' || !GUID.test(payment_token)) {
@@ -138,7 +151,10 @@ export async function handler(req: Request): Promise<Response> {
       headers: { MerchantId: merchantId, MerchantKey: merchantKey, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         MerchantOrderId: `pedido-${pedido.numero_pedido}-${pedido.id.slice(0, 8)}-cc`,
-        Customer: { Name: String(pedido.cliente_nome || 'Cliente').slice(0, 255) },
+        Customer: {
+          Name: String(pedido.cliente_nome || 'Cliente').slice(0, 255),
+          ...(cpfValido(cpf) ? { Identity: cpfValido(cpf), IdentityType: 'CPF' } : {}), // nunca vai pro log
+        },
         Payment: pagamento,
       }),
     });
