@@ -462,9 +462,15 @@ function carregarScriptSop(url) {
 }
 // Script do 3DS: precisa ser (re)carregado a cada autenticação, DEPOIS que o token novo já está nos campos da página.
 // Os eventos chegam em window.__bpmpiCbs, que a tela atualiza a cada tentativa.
-function carregarScript3ds(url, ambiente) {
+// ATENÇÃO: ao iniciar, o script LÊ o campo do token e o REMOVE da página. Por isso o token NÃO fica no JSX (o React não
+// saberia que o campo sumiu e não o recriaria na próxima tentativa): a cada carga criamos um campo novo, fora do React.
+function carregarScript3ds(url, ambiente, token) {
   return new Promise((resolve, reject) => {
     document.querySelectorAll('script[data-mpi3ds]').forEach((n) => n.remove());
+    document.querySelectorAll('.bpmpi_accesstoken').forEach((n) => n.remove());
+    const campoToken = document.createElement('input');
+    campoToken.type = 'hidden'; campoToken.className = 'bpmpi_accesstoken'; campoToken.value = token;
+    document.body.appendChild(campoToken);
     try { delete window.bpmpi_authenticate; } catch (e) { window.bpmpi_authenticate = undefined; }
     const chamar = (nome) => (e) => { try { window.__bpmpiCbs?.[nome]?.(e); } catch (err) { console.error(err); } };
     window.bpmpi_config = () => ({
@@ -540,14 +546,14 @@ function TelaCartaoCielo({ maxParcelas, debitoAtivo, usa3dsCredito, telefone, to
   useEffect(() => {
     if (!mpi) return undefined;
     let cancelado = false;
-    carregarScript3ds(mpi.scriptUrl, mpi.environment)
+    carregarScript3ds(mpi.scriptUrl, mpi.environment, mpi.accessToken)
       .then(() => { if (!cancelado) setMpiPronto(true); })
       .catch((e) => {
         if (cancelado) return;
         if (debito) setErroCarga(e.message);
         else setMpi(null); // no crédito, segue sem 3DS
       });
-    return () => { cancelado = true; };
+    return () => { cancelado = true; document.querySelectorAll('.bpmpi_accesstoken').forEach((n) => n.remove()); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mpi]);
 
@@ -734,7 +740,6 @@ function TelaCartaoCielo({ maxParcelas, debitoAtivo, usa3dsCredito, telefone, to
                 <>
                   <input type="hidden" className="bpmpi_auth" value="true" readOnly />
                   <input type="hidden" className="bpmpi_auth_suppresschallenge" value="false" readOnly />
-                  <input type="hidden" className="bpmpi_accesstoken" value={mpi.accessToken} readOnly />
                   <input type="hidden" className="bpmpi_ordernumber" value={String(numeroPedido)} readOnly />
                   <input type="hidden" className="bpmpi_currency" value="986" readOnly />
                   <input type="hidden" className="bpmpi_totalamount" value={String(centavos)} readOnly />
