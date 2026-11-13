@@ -868,6 +868,14 @@ const fatorPrecoCombo = (item, total) => (
     ? total / item.combo_quantidade_total : 1
 );
 // Janela de horário do item (além dos dias da semana). Aceita janela que vira a noite.
+// Resposta de rpc_cardapio_ultimas_unidades → listas de ids (sempre arrays; nunca quantidades).
+const lerUltimasUnidades = (d) => ({
+  itens: d?.itens || [],
+  opcoes: d?.opcoes || [],
+  itens_esgotados: d?.itens_esgotados || [],
+  opcoes_esgotadas: d?.opcoes_esgotadas || [],
+});
+
 const itemNoHorario = (item, agora) => {
   const ini = item.horario_disponivel_inicio?.slice(0, 5);
   const fim = item.horario_disponivel_fim?.slice(0, 5);
@@ -944,6 +952,20 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
   const [empresa, setEmpresa] = useState(null);
   const [categoriasBrutas, setCategoriasBrutas] = useState([]);
   const [itensBrutos, setItensBrutos] = useState([]);
+  // Só ids (nunca quantidades), vindos de rpc_cardapio_ultimas_unidades: itens/sabores com poucas
+  // unidades e os que zeraram nos dois estoques ("Esgotado" automático).
+  const [ultimasUnidades, setUltimasUnidades] = useState(() => lerUltimasUnidades(null));
+  useEffect(() => {
+    if (!empresa?.id) return undefined;
+    const t = setInterval(async () => {
+      try {
+        const { data } = await supabase.rpc('rpc_cardapio_ultimas_unidades', { p_empresa_id: empresa.id });
+        if (data) setUltimasUnidades(lerUltimasUnidades(data));
+      } catch (e) { /* aviso opcional */ }
+    }, 90000);
+    return () => clearInterval(t);
+  }, [empresa?.id]);
+  const ocultarEsgotados = empresa?.cardapio_config?.esgotado_comportamento !== 'mostrar_desabilitado';
   const [agoraTick, setAgoraTick] = useState(() => new Date());
   // Itens/categorias visíveis agora (dia da semana + horário do item). Reavalia a cada minuto.
   const itensPorCategoria = useMemo(() => {
@@ -951,12 +973,13 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
     const grouped = {};
     itensBrutos
       .filter((item) => (!item.dias_disponiveis || item.dias_disponiveis.length === 0 || item.dias_disponiveis.includes(dia)) && itemNoHorario(item, agoraTick))
+      .filter((item) => !(ocultarEsgotados && ultimasUnidades.itens_esgotados.includes(item.id)))
       .forEach((item) => {
         grouped[item.categoria_id] = grouped[item.categoria_id] || [];
         grouped[item.categoria_id].push(item);
       });
     return grouped;
-  }, [itensBrutos, agoraTick]);
+  }, [itensBrutos, agoraTick, ocultarEsgotados, ultimasUnidades.itens_esgotados]);
   const categorias = useMemo(
     () => categoriasBrutas.filter((c) => itensPorCategoria[c.id]?.length > 0),
     [categoriasBrutas, itensPorCategoria]
@@ -970,8 +993,6 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
   const travaScrollAteRef = useRef(0);
   const [categoriaAtivaId, setCategoriaAtivaId] = useState(null);
   const [saboresPorItem, setSaboresPorItem] = useState({});
-  // Só ids de itens/sabores com poucas unidades (nunca a quantidade). Vem de rpc_cardapio_ultimas_unidades.
-  const [ultimasUnidades, setUltimasUnidades] = useState({ itens: [], opcoes: [] });
   const [gruposPorItem, setGruposPorItem] = useState({});
 
   // Carrinho: array de entradas (não objeto por id), porque um item combo
@@ -1115,7 +1136,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
       // Aviso "Últimas unidades": opcional, nunca derruba o cardápio se falhar.
       try {
         const { data: ult } = await supabase.rpc('rpc_cardapio_ultimas_unidades', { p_empresa_id: empresaData.id });
-        setUltimasUnidades({ itens: ult?.itens || [], opcoes: ult?.opcoes || [] });
+        setUltimasUnidades(lerUltimasUnidades(ult));
       } catch (e) {
         console.warn('Aviso de últimas unidades indisponível:', e);
       }
@@ -1362,7 +1383,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
     const isCombo = item.combo_quantidade_total != null;
     const temAdicionais = (gruposPorItem[item.id] || []).length > 0;
     const qtdNoCarrinho = qtdSimplesNoCarrinho(item);
-    const esgotado = !item.ativo;
+    const esgotado = !item.ativo || ultimasUnidades.itens_esgotados.includes(item.id);
     return (
       <div key={item.id} className={`flex gap-3 p-3 ${esgotado ? 'opacity-50' : ''}`}>
         <div className="h-[84px] w-[84px] rounded-lg bg-gray-100 flex items-center justify-center overflow-hidden shrink-0">
@@ -1459,7 +1480,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
 
   // Item pedível: ativo, e (simples com produto+local OU combo com pelo menos 1 sabor cadastrado)
   const podePedir = (item) => {
-    if (!item.ativo) return false;
+    if (!item.ativo || ultimasUnidades.itens_esgotados.includes(item.id)) return false;
     if (item.combo_quantidade_total != null) return (saboresPorItem[item.id]?.length || 0) > 0;
     return !!item.produto_id && !!item.local_id;
   };
@@ -3643,8 +3664,10 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
 
               {isComboItem && (
                 <div className="space-y-2 max-h-80 max-sm:max-h-none overflow-y-auto max-sm:overflow-visible">
-                  {saboresDoItem.map((sabor) => (
-                    <div key={sabor.id} className="flex items-center gap-2.5 bg-white border rounded-xl p-2 shadow-sm">
+                  {saboresDoItem
+                    .filter((sabor) => !(ocultarEsgotados && ultimasUnidades.opcoes_esgotadas.includes(sabor.id)))
+                    .map((sabor) => { const saborEsgotado = ultimasUnidades.opcoes_esgotadas.includes(sabor.id); return (
+                    <div key={sabor.id} className={`flex items-center gap-2.5 bg-white border rounded-xl p-2 shadow-sm ${saborEsgotado ? 'opacity-50' : ''}`}>
                       <div className="h-11 w-11 rounded-lg bg-gray-100 flex items-center justify-center overflow-hidden shrink-0">
                         {sabor.imagem_url ? (
                           <img src={sabor.imagem_url} alt={sabor.nome} className="h-full w-full object-cover" />
@@ -3657,7 +3680,12 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                         {sabor.preco_adicional > 0 && (
                           <p className="text-xs text-gray-500">+{formatPreco(sabor.preco_adicional)} cada</p>
                         )}
-                        {ultimasUnidades.opcoes.includes(sabor.id) && (
+                        {saborEsgotado && (
+                          <span data-testid="sabor-esgotado" className="inline-flex items-center text-[11px] font-bold px-1.5 py-0.5 rounded-md bg-red-100 text-red-700">
+                            Esgotado
+                          </span>
+                        )}
+                        {!saborEsgotado && ultimasUnidades.opcoes.includes(sabor.id) && (
                           <span data-testid="ultimas-unidades-sabor" className="inline-flex items-center text-[11px] font-bold px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-800">
                             Últimas unidades
                           </span>
@@ -3668,12 +3696,12 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                           <Minus className="h-4 w-4" />
                         </Button>
                         <QtdInput campo aoVivo value={comboSelecoes[sabor.id] || 0} onCommit={(n) => definirSabor(sabor.id, n)} className="!w-11 !h-8 text-[15px]" />
-                        <Button variant="outline" size="icon" className="h-8 w-8 bg-white" onClick={() => ajustarSabor(sabor.id, 1)}>
+                        <Button variant="outline" size="icon" className="h-8 w-8 bg-white" disabled={saborEsgotado} onClick={() => ajustarSabor(sabor.id, 1)}>
                           <Plus className="h-4 w-4" />
                         </Button>
                       </div>
                     </div>
-                  ))}
+                    ); })}
                 </div>
               )}
 

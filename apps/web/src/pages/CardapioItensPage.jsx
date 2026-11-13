@@ -66,7 +66,7 @@ export default function CardapioItensPage() {
   const [itemDialogOpen, setItemDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [itemForm, setItemForm] = useState({
-    categoria_id: '', produto_id: '', local_id: '', nome: '', descricao: '', preco: '', imagem_url: '',
+    categoria_id: '', produto_id: '', local_id: '', local_reserva_id: '', nome: '', descricao: '', preco: '', imagem_url: '',
     isCombo: false, comboModo: 'fechado', comboQuantidadeTotal: '', comboOpcoes: [],
     tipo: 'comida', restricoesAlimentares: [],
     disponibilidadeTodosDias: true, diasDisponiveis: [],
@@ -370,7 +370,7 @@ export default function CardapioItensPage() {
   const openNewItem = (categoriaId) => {
     setEditingItem(null);
     setItemForm({
-      categoria_id: categoriaId || categorias[0]?.id || '', produto_id: '', local_id: localClassicos?.id || '', nome: '', descricao: '', preco: '', imagem_url: '',
+      categoria_id: categoriaId || categorias[0]?.id || '', produto_id: '', local_id: localClassicos?.id || '', local_reserva_id: '', nome: '', descricao: '', preco: '', imagem_url: '',
       isCombo: false, comboModo: 'fechado', comboQuantidadeTotal: '', comboOpcoes: [],
       tipo: 'comida', restricoesAlimentares: [],
       disponibilidadeTodosDias: true, diasDisponiveis: [],
@@ -386,7 +386,7 @@ export default function CardapioItensPage() {
   const openEditItem = async (item) => {
     setEditingItem(item);
     setItemForm({
-      categoria_id: item.categoria_id, produto_id: item.produto_id || '', local_id: item.local_id || '', nome: item.nome, descricao: item.descricao || '',
+      categoria_id: item.categoria_id, produto_id: item.produto_id || '', local_id: item.local_id || '', local_reserva_id: item.local_reserva_id || '', nome: item.nome, descricao: item.descricao || '',
       preco: String(item.preco), imagem_url: item.imagem_url || '',
       isCombo: item.combo_quantidade_total != null, comboModo: item.combo_modo || 'fechado',
       comboQuantidadeTotal: item.combo_quantidade_total != null ? String(item.combo_quantidade_total) : '',
@@ -535,6 +535,7 @@ export default function CardapioItensPage() {
         categoria_id: itemForm.categoria_id,
         produto_id: itemForm.isCombo ? null : (itemForm.produto_id || null),
         local_id: itemForm.local_id || null,
+        local_reserva_id: itemForm.local_reserva_id && itemForm.local_reserva_id !== itemForm.local_id ? itemForm.local_reserva_id : null,
         nome: itemForm.nome.trim(),
         descricao: itemForm.descricao.trim() || null,
         preco: precoNum,
@@ -583,6 +584,7 @@ export default function CardapioItensPage() {
             cardapio_item_id: cardapioItemId,
             produto_id: o.produto_id,
             local_id: itemForm.local_id,
+            local_reserva_id: itemForm.local_reserva_id && itemForm.local_reserva_id !== itemForm.local_id ? itemForm.local_reserva_id : null,
             nome: o.nome.trim() || 'Sabor',
             preco_adicional: parseFloat(String(o.preco_adicional).replace(',', '.')) || 0,
             imagem_url: saborImagemUrl,
@@ -637,6 +639,42 @@ export default function CardapioItensPage() {
     }
   };
 
+  // Atalho: define (ou remove) o estoque de reserva de TODOS os itens e sabores de uma vez.
+  const localCentral = locais.find((l) => semAcento(l.nome).includes('central')) || null;
+  const [reservaEmMassa, setReservaEmMassa] = useState('');
+  const [aplicandoReserva, setAplicandoReserva] = useState(false);
+  const reservaEscolhida = reservaEmMassa || localCentral?.id || '';
+  const itensComReserva = itens.filter((i) => i.local_reserva_id).length;
+
+  const aplicarReservaEmMassa = async (localReservaId) => {
+    const nomeReserva = locais.find((l) => l.id === localReservaId)?.nome;
+    const pergunta = localReservaId
+      ? `Usar "${nomeReserva}" como reserva em todos os itens e sabores do cardápio?`
+      : 'Remover o estoque de reserva de todos os itens e sabores?';
+    if (!window.confirm(pergunta)) return;
+    setAplicandoReserva(true);
+    try {
+      let qItens = supabase.from('cardapio_itens').update({ local_reserva_id: localReservaId || null }).eq('empresa_id', empresaId);
+      if (localReservaId) qItens = qItens.neq('local_id', localReservaId);
+      const { error: errItens } = await qItens;
+      if (errItens) throw errItens;
+
+      const ids = itens.map((i) => i.id);
+      if (ids.length > 0) {
+        let qSabores = supabase.from('cardapio_combo_opcoes').update({ local_reserva_id: localReservaId || null }).in('cardapio_item_id', ids);
+        if (localReservaId) qSabores = qSabores.neq('local_id', localReservaId);
+        const { error: errSabores } = await qSabores;
+        if (errSabores) throw errSabores;
+      }
+      toast({ title: localReservaId ? 'Reserva aplicada!' : 'Reserva removida', description: localReservaId ? `Os itens agora usam "${nomeReserva}" quando faltar no estoque principal.` : undefined });
+      loadData();
+    } catch (error) {
+      toast({ title: 'Erro ao atualizar a reserva', description: error.message, variant: 'destructive' });
+    } finally {
+      setAplicandoReserva(false);
+    }
+  };
+
   if (loading) {
     return (
       <DashboardLayout>
@@ -656,6 +694,34 @@ export default function CardapioItensPage() {
             <UtensilsCrossed className="h-6 w-6" /> Itens do Cardápio
           </h1>
           <p className="text-gray-500 text-sm">Categorias, itens e combos que aparecem na vitrine pública.</p>
+        </div>
+
+        <div className="border rounded-xl bg-white p-4 space-y-2" data-testid="reserva-em-massa">
+          <p className="text-sm font-semibold text-gray-900">Estoque de reserva</p>
+          <p className="text-xs text-gray-500">
+            Quando o estoque principal (Clássicos) zerar, o pedido completa com a reserva. O cliente só é barrado, e o item só aparece "Esgotado", quando zerar nos dois.
+            {' '}{itensComReserva > 0 ? `${itensComReserva} item(ns) com reserva configurada.` : 'Nenhum item com reserva ainda.'}
+          </p>
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="min-w-[220px]">
+              <Label htmlFor="reserva-massa" className="text-gray-900 text-xs">Local de reserva</Label>
+              <select
+                id="reserva-massa"
+                className="w-full mt-1 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900"
+                value={reservaEscolhida}
+                onChange={(e) => setReservaEmMassa(e.target.value)}
+              >
+                <option value="">Escolha o local</option>
+                {locais.map((l) => <option key={l.id} value={l.id}>{l.nome}</option>)}
+              </select>
+            </div>
+            <Button size="sm" disabled={!reservaEscolhida || aplicandoReserva} onClick={() => aplicarReservaEmMassa(reservaEscolhida)}>
+              {aplicandoReserva ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Aplicar a todos os itens'}
+            </Button>
+            {itensComReserva > 0 && (
+              <Button size="sm" variant="outline" disabled={aplicandoReserva} onClick={() => aplicarReservaEmMassa(null)}>Remover de todos</Button>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center justify-between">
@@ -869,6 +935,22 @@ export default function CardapioItensPage() {
                 ).map((l) => <option key={l.id} value={l.id}>{l.nome}</option>)}
               </select>
               <p className="text-xs text-gray-400 mt-1">O cardápio vende do estoque Clássicos — o produto abaixo mostra só o que tem estoque ali.</p>
+            </div>
+
+            <div>
+              <Label htmlFor="item-local-reserva" className="text-gray-900">Estoque de reserva (opcional)</Label>
+              <select
+                id="item-local-reserva"
+                className="w-full mt-1 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900"
+                value={itemForm.local_reserva_id}
+                onChange={(e) => setItemForm((f) => ({ ...f, local_reserva_id: e.target.value }))}
+              >
+                <option value="">Sem reserva</option>
+                {locais.filter((l) => l.id !== itemForm.local_id).map((l) => <option key={l.id} value={l.id}>{l.nome}</option>)}
+              </select>
+              <p className="text-xs text-gray-400 mt-1">
+                Se faltar no estoque principal, o pedido completa com este estoque (o principal é usado primeiro). O item só fica "Esgotado" quando zerar nos dois.
+              </p>
             </div>
 
             <div className="flex items-center justify-between border rounded-lg p-3">
