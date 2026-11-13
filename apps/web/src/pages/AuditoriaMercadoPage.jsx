@@ -678,7 +678,9 @@ export default function AuditoriaMercadoPage() {
     return s + qtd * Number(item?.preco || 0);
   }, 0);
   const totalValorSubstituicaoCredito = substituicoesValidas.reduce((s, sub) => s + sub.valorOrigem, 0);
-  const totalValorReabastecimento = Math.max(0, totalValorReabastecimentoBruto - totalValorDanificado - totalValorDevolvido - totalValorMovidoCredito - totalValorSubstituicaoCredito);
+  // Pode ficar NEGATIVO: retirou mais do que repôs = saldo a favor do mercadinho
+  // (o Faturamento de Reabastecimento desconta isso do total do pedido).
+  const totalValorReabastecimento = Math.round((totalValorReabastecimentoBruto - totalValorDanificado - totalValorDevolvido - totalValorMovidoCredito - totalValorSubstituicaoCredito) * 100) / 100;
   // Usado só pra mostrar a etiqueta "substituição por dano" na lista — não
   // afeta mais o valor cobrado (isso já é resolvido descontando o dano do total).
   const isSubstituicao = (item) => itensContagem.some(i => i.substituir_lote_id === item.lote_id && i.substituir_quantidade > 0);
@@ -1480,8 +1482,8 @@ export default function AuditoriaMercadoPage() {
                     <p className="text-2xl font-black text-teal-700 mt-1">{fmt(successData.totalVendido)}</p>
                   </div>
                   <div className="bg-orange-50 rounded-xl p-4 text-center border border-orange-100">
-                    <p className="text-xs font-bold text-orange-600 uppercase">Valor Reabastecimento</p>
-                    <p className="text-2xl font-black text-orange-700 mt-1">{fmt(successData.valorReabastecimento)}</p>
+                    <p className="text-xs font-bold text-orange-600 uppercase">{successData.valorReabastecimento < 0 ? 'Saldo a favor do mercado' : 'Valor Reabastecimento'}</p>
+                    <p className={`text-2xl font-black mt-1 ${successData.valorReabastecimento < 0 ? 'text-red-700' : 'text-orange-700'}`}>{fmt(successData.valorReabastecimento)}</p>
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -2782,8 +2784,11 @@ export default function AuditoriaMercadoPage() {
                         <p className="text-2xl font-black text-teal-700 mt-1">{fmt(totalVendidoEstimado)}</p>
                       </div>
                       <div className="bg-orange-50 rounded-2xl p-4 text-center border border-orange-100">
-                        <p className="text-xs font-bold text-orange-600 uppercase">Valor Reabastecimento</p>
-                        <p className="text-2xl font-black text-orange-700 mt-1">{fmt(totalValorReabastecimento)}</p>
+                        <p className="text-xs font-bold text-orange-600 uppercase">{totalValorReabastecimento < 0 ? 'Saldo a favor do mercado' : 'Valor Reabastecimento'}</p>
+                        <p data-testid="valor-reabastecimento" className={`text-2xl font-black mt-1 ${totalValorReabastecimento < 0 ? 'text-red-700' : 'text-orange-700'}`}>{fmt(totalValorReabastecimento)}</p>
+                        {totalValorReabastecimento < 0 && (
+                          <p className="text-[11px] text-red-600 mt-1">Retirou mais do que repôs. Esse valor é descontado do total do pedido de faturamento.</p>
+                        )}
                       </div>
                       <div className="bg-blue-50 rounded-2xl p-4 text-center border border-blue-100">
                         <p className="text-xs font-bold text-blue-600 uppercase">Lotes contados</p>
@@ -3005,8 +3010,8 @@ export default function AuditoriaMercadoPage() {
                             </div>
                           )}
                           <div className="flex items-center justify-between text-xs text-blue-900 py-0.5 mt-1 pt-1 border-t border-blue-200 font-bold">
-                            <span>Total líquido</span>
-                            <span>{fmt(totalValorReabastecimento)}</span>
+                            <span>{totalValorReabastecimento < 0 ? 'Saldo a favor do mercado' : 'Total líquido'}</span>
+                            <span className={totalValorReabastecimento < 0 ? 'text-red-700' : ''}>{fmt(totalValorReabastecimento)}</span>
                           </div>
                         </div>
                       );

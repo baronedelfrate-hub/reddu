@@ -628,6 +628,18 @@ export default function PedidoReabastecimentoPage() {
   };
 
   const fmt = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
+
+  // Mercado com saldo NEGATIVO (retirou mais do que repôs): é saldo a favor do
+  // mercadinho e desconta do total do pedido. `lista` = [{ nome, valor }].
+  const resumoSaldos = (lista) => {
+    const negativos = lista.filter(i => i.valor < -0.005);
+    const positivos = lista.filter(i => i.valor >= -0.005);
+    return {
+      negativos,
+      somaPositivos: Math.round(positivos.reduce((s, i) => s + i.valor, 0) * 100) / 100,
+      somaNegativos: Math.round(negativos.reduce((s, i) => s + i.valor, 0) * 100) / 100,
+    };
+  };
   const formatDate = (d) => { if (!d) return '-'; return d.split('-').reverse().join('/'); };
   const formatDateTime = (d) => {
     if (!d) return '-';
@@ -737,6 +749,21 @@ export default function PedidoReabastecimentoPage() {
 
         const movsValidos = (movs || []).filter(m => !movIdsJaUsadas.has(m.id));
 
+        // Até que data esse mercado já foi coberto por algum pedido (gerado ou
+        // baixado). Retirada SEM reabastecimento no mesmo dia só vira crédito
+        // se for posterior a isso — senão seria um crédito de visita antiga,
+        // que já foi faturada (e não tem como saber se esse crédito já foi
+        // aplicado naquela época).
+        const { data: pedidosDoMercado } = await supabase
+          .from('pedidos_reabastecimento_mercados')
+          .select('pedidos_reabastecimento(data_fim, status)')
+          .eq('local_id', mercado.id);
+        const fimsCobertos = (pedidosDoMercado || [])
+          .map(r => r.pedidos_reabastecimento)
+          .filter(pr => pr && pr.status !== 'cancelado' && pr.data_fim)
+          .map(pr => new Date(`${pr.data_fim}T23:59:59`).getTime());
+        const ultimoFimCoberto = fimsCobertos.length ? Math.max(...fimsCobertos) : null;
+
         // Busca à parte (sem FK/embed — ver comentário acima) o nome de cada
         // produto que foi substituído nessas movimentações, só pra exibir
         // na Auditoria de Mercado / conferência interna.
@@ -763,7 +790,7 @@ export default function PedidoReabastecimentoPage() {
         // mais abaixo).
         const { data: danos } = await supabase
           .from('movimentacoes')
-          .select('produto_id, quantidade, data_movimentacao')
+          .select('id, produto_id, quantidade, data_movimentacao')
           .eq('empresa_id', empresaId)
           .in('tipo', ['devolucao', 'descarte'])
           .eq('motivo_devolucao', 'danificado')
@@ -779,14 +806,29 @@ export default function PedidoReabastecimentoPage() {
         // outra como substituição.
         const { data: devolvidosData } = await supabase
           .from('movimentacoes')
-          .select('produto_id, quantidade, data_movimentacao')
+          .select('id, produto_id, quantidade, data_movimentacao')
           .eq('empresa_id', empresaId)
           .eq('tipo', 'transferencia')
           .eq('local_origem_id', mercado.id)
           .or('motivo_devolucao.is.null,motivo_devolucao.neq.substituicao_produto')
           .gte('data_movimentacao', `${dataInicio}T00:00:00`)
           .lte('data_movimentacao', `${dataFim}T23:59:59`);
-        const devolvidos = devolvidosData || [];
+        // Retiradas/danos já contabilizados num pedido anterior não entram de novo.
+        const devolvidos = (devolvidosData || []).filter(d => !movIdsJaUsadas.has(d.id));
+        const danosPendentes = (danos || []).filter(d => !movIdsJaUsadas.has(d.id));
+
+        // Nome/preço dos produtos retirados (a retirada pode ser de um produto
+        // que NÃO foi reabastecido nessa visita — aí não vem nas entradas).
+        const idsRetirados = [...new Set([...danosPendentes, ...devolvidos].map(d => d.produto_id).filter(Boolean))];
+        const infoProdutosRetirados = {};
+        if (idsRetirados.length > 0) {
+          const { data: prodsRet } = await supabase
+            .from('produtos')
+            .select('id, nome, preco_bandeja_mercado, preco_bandeja')
+            .in('id', idsRetirados);
+          (prodsRet || []).forEach(pr => { infoProdutosRetirados[pr.id] = pr; });
+        }
+        const idsRetiradasCreditadas = new Set();
 
         // Pedido do Fernando: quando o período pego pra faturar tem MAIS DE
         // UMA visita do mesmo mercado (ex.: juntou vários mercados e esse
@@ -804,7 +846,7 @@ export default function PedidoReabastecimentoPage() {
           return visitasMap.get(chave);
         };
         movsValidos.forEach(m => getVisita(m.data_movimentacao).movs.push(m));
-        (danos || []).forEach(d => getVisita(d.data_movimentacao).danos.push(d));
+        danosPendentes.forEach(d => getVisita(d.data_movimentacao).danos.push(d));
         devolvidos.forEach(d => getVisita(d.data_movimentacao).devolvidos.push(d));
 
         const visitasOrdenadas = [...visitasMap.entries()].sort((a, b) => new Date(a[0]) - new Date(b[0]));
@@ -832,12 +874,40 @@ export default function PedidoReabastecimentoPage() {
             if (!deducoesPorProdutoEMotivo[produtoId]) deducoesPorProdutoEMotivo[produtoId] = {};
             deducoesPorProdutoEMotivo[produtoId][rotulo] = (deducoesPorProdutoEMotivo[produtoId][rotulo] || 0) + Number(qtd || 0);
           };
-          dadosVisita.danos.forEach(d => somarDeducao(d.produto_id, 'Danificado', d.quantidade));
-          dadosVisita.devolvidos.forEach(d => somarDeducao(d.produto_id, 'Retirado do mercado', d.quantidade));
+          // Visita com reabastecimento ainda não faturado: toda retirada dela
+          // entra. Visita SÓ com retirada (sem entrada): só entra se for
+          // posterior ao último pedido já gerado desse mercado (ver acima).
+          const visitaTemEntradas = dadosVisita.movs.length > 0;
+          const elegivel = (d) => visitaTemEntradas
+            || ultimoFimCoberto === null
+            || new Date(d.data_movimentacao).getTime() > ultimoFimCoberto;
+          const danosVisita = dadosVisita.danos.filter(elegivel);
+          const devolvidosVisita = dadosVisita.devolvidos.filter(elegivel);
+          [...danosVisita, ...devolvidosVisita].forEach(d => idsRetiradasCreditadas.add(d.id));
+          danosVisita.forEach(d => somarDeducao(d.produto_id, 'Danificado', d.quantidade));
+          devolvidosVisita.forEach(d => somarDeducao(d.produto_id, 'Retirado do mercado', d.quantidade));
+
+          // Retirada que NÃO foi absorvida pelo reabastecimento do próprio
+          // produto (produto que não entrou nessa visita, ou retirou mais do
+          // que entrou) vira linha NEGATIVA: é saldo a favor do mercado, que
+          // desconta do total do pedido em vez de sumir.
+          const linhasSaldo = [];
+          const somarSaldo = (produtoId, nome, motivo, qtd, preco) => {
+            if (!(qtd > 0.001) || !(preco > 0)) return;
+            const chave = `${produtoId}|${motivo}`;
+            const existente = linhasSaldo.find(l => l.chave === chave);
+            if (existente) existente.qtd += qtd;
+            else linhasSaldo.push({ chave, produtoId, nome, motivo, qtd, preco });
+          };
 
           Object.entries(deducoesPorProdutoEMotivo).forEach(([produtoId, porMotivo]) => {
             const p = porProduto[produtoId];
-            if (!p) return;
+            if (!p) {
+              const info = infoProdutosRetirados[produtoId];
+              const precoInfo = Number(info?.preco_bandeja_mercado || info?.preco_bandeja || 0);
+              Object.entries(porMotivo).forEach(([motivo, qtd]) => somarSaldo(produtoId, info?.nome || 'Produto', motivo, Number(qtd), precoInfo));
+              return;
+            }
             const qtdTotalSolicitada = Object.values(porMotivo).reduce((s, q) => s + q, 0);
             const valorSolicitado = qtdTotalSolicitada * p.valorUnitario;
             const valorClampado = Math.min(p.valor, valorSolicitado);
@@ -850,6 +920,11 @@ export default function PedidoReabastecimentoPage() {
               ])
             );
             p.valor -= valorClampado;
+
+            // O que passou do valor reabastecido desse produto não some: vira saldo.
+            Object.entries(porMotivo).forEach(([motivo, qtd]) => {
+              somarSaldo(produtoId, p.nome, motivo, Math.round(Number(qtd) * (1 - fator) * 100) / 100, p.valorUnitario);
+            });
           });
 
           // Valor bruto entregue de cada produto NESSA visita (antes de
@@ -955,6 +1030,18 @@ export default function PedidoReabastecimentoPage() {
             return a.nome.localeCompare(b.nome);
           });
 
+          linhasSaldo.forEach(l => {
+            itensVisita.push({
+              produto_id: null,
+              nome: `(−) ${l.motivo}: ${l.nome}`,
+              quantidade: l.qtd,
+              valorUnitario: -l.preco,
+              valor: -Math.round(l.qtd * l.preco * 100) / 100,
+              deducoes: {},
+              saldoMercado: true,
+            });
+          });
+
           // Sobra da troca por produto de menor valor: o mercadinho já pagou
           // mais do que o produto novo vale, então isso desconta do subtotal
           // dessa visita (não só de uma linha de produto específica) — entra
@@ -977,7 +1064,9 @@ export default function PedidoReabastecimentoPage() {
         });
 
         const subtotal = visitas.reduce((s, v) => s + v.subtotal, 0);
-        const movIds = movsValidos.map(m => m.id);
+        // Entradas desta visita + retiradas creditadas: todas ficam marcadas como
+        // faturadas, pra não entrarem de novo em outro pedido.
+        const movIds = [...new Set([...movsValidos.map(m => m.id), ...idsRetiradasCreditadas])];
 
         if (visitas.length > 0) {
           resultadoPorMercado.push({ local: mercado, visitas, subtotal, movIds });
@@ -1565,7 +1654,7 @@ export default function PedidoReabastecimentoPage() {
             <tbody>${linhasHtml}</tbody>
             <tfoot>
               <tr style="background:${RED};color:#fff;">
-                <td colspan="3" style="padding:6px 8px;font-size:12px;font-weight:bold;text-align:right;">TOTAL</td>
+                <td colspan="3" style="padding:6px 8px;font-size:12px;font-weight:bold;text-align:right;">${parseFloat(m.valor_total) < -0.005 ? 'SALDO A FAVOR DO MERCADO (desconta do total)' : 'TOTAL'}</td>
                 <td style="padding:6px 8px;font-size:12px;font-weight:bold;text-align:right;">${fmt(m.valor_total)}</td>
               </tr>
             </tfoot>
@@ -1573,6 +1662,8 @@ export default function PedidoReabastecimentoPage() {
         `;
       }).join('');
 
+ 
+      const resumoSaldosPdf = resumoSaldos((pedidoAberto.pedidos_reabastecimento_mercados || []).map(m => ({ nome: m.locais?.nome || 'Mercado', valor: parseFloat(m.valor_total) || 0 })));
       const html = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1620,6 +1711,14 @@ export default function PedidoReabastecimentoPage() {
     <p style="font-size:12px;color:#666;margin-bottom:16px;">Período: ${formatDate(pedidoAberto.data_inicio)} a ${formatDate(pedidoAberto.data_fim)}</p>
 
     ${mercadosHtml}
+
+    ${resumoSaldosPdf.negativos.length > 0 ? `
+    <div style="margin-top:20px;display:flex;justify-content:flex-end;">
+      <table style="font-size:12px;border-collapse:collapse;">
+        <tr><td style="padding:3px 12px;text-align:right;color:#555;">Mercados com cobrança</td><td style="padding:3px 0;text-align:right;font-weight:bold;">${fmt(resumoSaldosPdf.somaPositivos)}</td></tr>
+        ${resumoSaldosPdf.negativos.map(n => `<tr><td style="padding:3px 12px;text-align:right;color:#b91c1c;">(−) Saldo a favor de ${n.nome}</td><td style="padding:3px 0;text-align:right;font-weight:bold;color:#b91c1c;">−${fmt(Math.abs(n.valor))}</td></tr>`).join('')}
+      </table>
+    </div>` : ''}
 
     <div style="margin-top:20px;display:flex;justify-content:flex-end;">
       <div style="text-align:right;">
@@ -1808,12 +1907,33 @@ export default function PedidoReabastecimentoPage() {
                         </p>
                       )}
                       <div className="flex justify-end">
-                        <span className="text-sm font-bold text-blue-700 bg-blue-50 px-3 py-1.5 rounded-full">
-                          Subtotal {m.local.nome}: {fmt(m.subtotal)}
-                        </span>
+                        {m.subtotal < -0.005 ? (
+                          <span data-testid="subtotal-saldo-mercado" className="text-sm font-bold text-red-700 bg-red-50 px-3 py-1.5 rounded-full">
+                            Saldo a favor de {m.local.nome}: {fmt(m.subtotal)} (desconta do total)
+                          </span>
+                        ) : (
+                          <span className="text-sm font-bold text-blue-700 bg-blue-50 px-3 py-1.5 rounded-full">
+                            Subtotal {m.local.nome}: {fmt(m.subtotal)}
+                          </span>
+                        )}
                       </div>
                     </div>
                   ))}
+
+                  {(() => {
+                    const r = resumoSaldos(preview.mercados.map(m => ({ nome: m.local.nome, valor: m.subtotal })));
+                    if (r.negativos.length === 0) return null;
+                    return (
+                      <div data-testid="resumo-saldos" className="px-5 py-3 border-t border-gray-100 space-y-1 text-sm">
+                        <div className="flex justify-between text-gray-700"><span>Mercados com cobrança</span><span className="font-semibold">{fmt(r.somaPositivos)}</span></div>
+                        {r.negativos.map(n => (
+                          <div key={n.nome} className="flex justify-between text-red-600">
+                            <span>(−) Saldo a favor de {n.nome}</span><span className="font-semibold">−{fmt(Math.abs(n.valor))}</span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
 
                   <div className="px-5 py-4 border-t border-gray-100 bg-blue-50 flex items-center justify-between">
                     <p className="font-bold text-blue-800">Total do Pedido</p>
@@ -1970,7 +2090,9 @@ export default function PedidoReabastecimentoPage() {
                     </table>
                   </div>
                   <div className="flex justify-end">
-                    <span className="text-sm font-bold text-blue-700">Subtotal: {fmt(m.valor_total)}</span>
+                    {parseFloat(m.valor_total) < -0.005
+                      ? <span className="text-sm font-bold text-red-700">Saldo a favor do mercado: {fmt(m.valor_total)} (desconta do total)</span>
+                      : <span className="text-sm font-bold text-blue-700">Subtotal: {fmt(m.valor_total)}</span>}
                   </div>
 
                   {/* Emissão de NF + envio por e-mail, por mercado */}
@@ -2127,6 +2249,21 @@ export default function PedidoReabastecimentoPage() {
                   </div>
                 </div>
               )}
+
+              {(() => {
+                const r = resumoSaldos((pedidoAberto.pedidos_reabastecimento_mercados || []).map(m => ({ nome: m.locais?.nome || 'Mercado', valor: parseFloat(m.valor_total) || 0 })));
+                if (r.negativos.length === 0) return null;
+                return (
+                  <div className="px-5 py-3 border-t border-gray-100 space-y-1 text-sm">
+                    <div className="flex justify-between text-gray-700"><span>Mercados com cobrança</span><span className="font-semibold">{fmt(r.somaPositivos)}</span></div>
+                    {r.negativos.map(n => (
+                      <div key={n.nome} className="flex justify-between text-red-600">
+                        <span>(−) Saldo a favor de {n.nome}</span><span className="font-semibold">−{fmt(Math.abs(n.valor))}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
 
               <div className="px-5 py-4 border-t border-gray-100 bg-blue-50 flex items-center justify-between">
                 <p className="font-bold text-blue-800">Total do Pedido</p>
