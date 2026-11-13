@@ -26,6 +26,16 @@ import { recordMarketplaceSale } from '@/services/salesService';
 // o Horizons não estava conseguindo criar arquivo novo do zero. Se no
 // futuro isso for resolvido, pode extrair pra um arquivo próprio sem
 // problema — é só copiar este bloco inteiro.
+// xNome (nome do destinatário) da NF aceita no máximo 60 caracteres. Na nota combinada o nome
+// vira "MERCADO A + MERCADO B + MERCADO C" e estourava (a Focus devolvia erro de schema).
+// Se passar de 60, tira o prefixo "MERCADINHO - " de cada nome; se ainda passar, corta em 60.
+export const nomeDestinatarioNF = (nome) => {
+  const limpo = String(nome || 'CLIENTE').replace(/\s+/g, ' ').trim();
+  if (limpo.length <= 60) return limpo;
+  const curto = limpo.replace(/MERCADINHO\s*-\s*/gi, '').replace(/\s+/g, ' ').trim();
+  return curto.slice(0, 60).trim();
+};
+
 const fiscalReabastecimentoService = {
   async obterConfiguracoesEmpresa(empresaId) {
     if (!empresaId) throw new Error('empresaId é obrigatório');
@@ -196,7 +206,7 @@ const fiscalReabastecimentoService = {
     // maior que o subtotal financeiro mostrado no pedido.
     const divergeDoSubtotal = Math.abs(totalNF - totalRegistradoNoPedido) > 0.01;
 
-    const nomeDestinatario = pedidoMercado.locais?.nome || 'CLIENTE';
+    const nomeDestinatario = nomeDestinatarioNF(pedidoMercado.locais?.nome);
 
     if (divergeDoSubtotal) {
       console.warn(
