@@ -390,6 +390,7 @@ export default function DashboardLayout({ children }) {
           isSubgroup: true, title: 'Configurações',
           items: [
             { name: 'Itens do Cardápio', href: '/dashboard/cardapio/itens', icon: UtensilsCrossed },
+            { name: 'Estoque do Cardápio', href: '/dashboard/cardapio/estoque', icon: Boxes },
             { name: 'Cupons de Desconto', href: '/dashboard/cardapio/cupons', icon: Tag },
             { name: 'Cashback', href: '/dashboard/cardapio/cashback', icon: Coins },
             { name: 'Clientes', href: '/dashboard/cardapio/clientes', icon: Users },

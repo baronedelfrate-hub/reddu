@@ -6,6 +6,7 @@
 //   - Resumo diário do Cardápio Digital (1x por dia, no horário configurado)
 //   - Pedido parado além do tempo de preparo configurado
 //   - Pedido com erro na emissão da NFC-e
+//   - Estoque baixo ou esgotado de itens do cardápio (limite mínimo em cardapio_config.estoque_limite_minimo)
 //
 // Segurança: mesmo padrão do campanha-processor — valida x-cron-secret
 // contra o secret CARDAPIO_ALERTAS_CRON_SECRET, se configurado (opcional).
@@ -198,6 +199,66 @@ Deno.serve(async (req) => {
           await serviceClient.from('pedidos_cardapio').update({ alerta_fiscal_enviado_em: new Date().toISOString() }).eq('id', p.id);
         }
         resumoExecucao.erros_fiscais_alertados = (pedidosErro || []).length;
+      }
+
+      // --- Estoque baixo / esgotado no cardápio ---
+      // Avisa UMA vez quando um item ativo entra em "baixo" (até o limite mínimo) ou
+      // "zerado"; só volta a avisar depois que o estoque se recompõe acima do limite.
+      if (cfg.estoque_baixo_ativo !== false) {
+        const { data: painel, error: painelErro } = await serviceClient.rpc('cardapio_estoque_itens', { p_empresa_id: empresa.id });
+        if (painelErro) {
+          console.error('[cardapio-alertas-gestor] erro ao ler estoque do cardápio:', painelErro);
+        } else {
+          const { data: estados } = await serviceClient
+            .from('cardapio_estoque_alertas')
+            .select('cardapio_item_id, nivel')
+            .eq('empresa_id', empresa.id);
+          const anterior = new Map<string, string>((estados || []).map((e: any) => [e.cardapio_item_id, e.nivel]));
+          const itensEstoque: any[] = painel?.itens || [];
+          const limite = Number(painel?.limite) || 5;
+
+          const emAtencao = itensEstoque.filter((i) => i.ativo && (i.status === 'baixo' || i.status === 'zerado'));
+          // Avisa quando é novo, ou quando piorou (baixo → zerado). Zerado → baixo (repôs um pouco) não avisa.
+          const paraAvisar = emAtencao.filter((i) => {
+            const ant = anterior.get(i.id);
+            return !ant || (ant === 'baixo' && i.status === 'zerado');
+          });
+
+          if (paraAvisar.length > 0) {
+            const detalhe = (i: any) => {
+              const barrados = Number(i.bloqueios_7d) > 0 ? ` — ${i.bloqueios_7d} venda(s) barrada(s) em 7 dias` : '';
+              if (i.tipo === 'combo') {
+                const sabores = (i.opcoes || []).filter((o: any) => o.status !== 'ok')
+                  .map((o: any) => `${o.nome} (${o.status === 'zerado' ? 'esgotado' : `${o.estoque} un`})`).join(', ');
+                return `• ${i.nome}: ${sabores}${barrados}`;
+              }
+              return `• ${i.nome} (${i.status === 'zerado' ? 'esgotado' : `${i.estoque} un`})${barrados}`;
+            };
+            const zerados = paraAvisar.filter((i) => i.status === 'zerado');
+            const baixos = paraAvisar.filter((i) => i.status === 'baixo');
+            const texto = `📦 Estoque do cardápio — ${empresa.nome}\n`
+              + (zerados.length ? `🔴 Esgotados:\n${zerados.map(detalhe).join('\n')}\n` : '')
+              + (baixos.length ? `🟡 Estoque baixo (limite ${limite} un):\n${baixos.map(detalhe).join('\n')}\n` : '')
+              + 'Veja em Cardápio → Estoque do Cardápio.';
+            await disparar(serviceClient, empresa.id, cfg, texto.trim(), `Estoque do cardápio — ${empresa.nome}`);
+          }
+
+          // Atualiza o estado: grava o nível atual de quem está em atenção e limpa quem recompôs.
+          const idsEmAtencao = new Set(emAtencao.map((i) => i.id));
+          for (const i of emAtencao) {
+            if (anterior.get(i.id) !== i.status) {
+              await serviceClient.from('cardapio_estoque_alertas').upsert({
+                empresa_id: empresa.id, cardapio_item_id: i.id, nivel: i.status, alertado_em: new Date().toISOString(),
+              }, { onConflict: 'empresa_id,cardapio_item_id' });
+            }
+          }
+          for (const [itemId] of anterior) {
+            if (!idsEmAtencao.has(itemId)) {
+              await serviceClient.from('cardapio_estoque_alertas').delete().eq('empresa_id', empresa.id).eq('cardapio_item_id', itemId);
+            }
+          }
+          resumoExecucao.estoque_alertados = paraAvisar.length;
+        }
       }
 
       if (Object.keys(resumoExecucao).length) resultados[empresa.id] = resumoExecucao;

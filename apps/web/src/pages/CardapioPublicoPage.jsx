@@ -970,6 +970,8 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
   const travaScrollAteRef = useRef(0);
   const [categoriaAtivaId, setCategoriaAtivaId] = useState(null);
   const [saboresPorItem, setSaboresPorItem] = useState({});
+  // Só ids de itens/sabores com poucas unidades (nunca a quantidade). Vem de rpc_cardapio_ultimas_unidades.
+  const [ultimasUnidades, setUltimasUnidades] = useState({ itens: [], opcoes: [] });
   const [gruposPorItem, setGruposPorItem] = useState({});
 
   // Carrinho: array de entradas (não objeto por id), porque um item combo
@@ -1109,6 +1111,14 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
         saboresAgrupados[s.cardapio_item_id].push(s);
       });
       setSaboresPorItem(saboresAgrupados);
+
+      // Aviso "Últimas unidades": opcional, nunca derruba o cardápio se falhar.
+      try {
+        const { data: ult } = await supabase.rpc('rpc_cardapio_ultimas_unidades', { p_empresa_id: empresaData.id });
+        setUltimasUnidades({ itens: ult?.itens || [], opcoes: ult?.opcoes || [] });
+      } catch (e) {
+        console.warn('Aviso de últimas unidades indisponível:', e);
+      }
 
       // Grupos de adicionais reaproveitáveis vinculados a cada item (ex:
       // "Molhos extras" usado tanto num salgado quanto numa bebida).
@@ -1394,6 +1404,11 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
           {cashbackAtivo && !esgotado && item.combo_modo !== 'livre' && Number(item.preco) > 0 && (
             <span className="inline-flex items-center gap-1 mt-1 text-[11px] font-bold px-1.5 py-0.5 rounded-md bg-green-100 text-green-800">
               <Coins className="h-3 w-3" />{Number(cashbackInfo.percentual)}% cashback
+            </span>
+          )}
+          {!esgotado && ultimasUnidades.itens.includes(item.id) && (
+            <span data-testid="ultimas-unidades" className="inline-flex items-center mt-1 ml-1 text-[11px] font-bold px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-800">
+              Últimas unidades
             </span>
           )}
           </div>
@@ -3641,6 +3656,11 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                         <p className="text-[15px] leading-snug font-medium text-gray-900">{sabor.nome}</p>
                         {sabor.preco_adicional > 0 && (
                           <p className="text-xs text-gray-500">+{formatPreco(sabor.preco_adicional)} cada</p>
+                        )}
+                        {ultimasUnidades.opcoes.includes(sabor.id) && (
+                          <span data-testid="ultimas-unidades-sabor" className="inline-flex items-center text-[11px] font-bold px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-800">
+                            Últimas unidades
+                          </span>
                         )}
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">

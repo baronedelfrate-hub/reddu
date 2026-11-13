@@ -83,6 +83,7 @@ import CardapioEntregaPage from './pages/CardapioEntregaPage';
 import CardapioCashbackPage from './pages/CardapioCashbackPage';
 import CardapioPagamentoPage from './pages/CardapioPagamentoPage';
 import CardapioWhatsappPage from './pages/CardapioWhatsappPage';
+import CardapioEstoquePage from './pages/CardapioEstoquePage';
 import CardapioItensPage from './pages/CardapioItensPage';
 import CardapioPublicoPage from './pages/CardapioPublicoPage';
 import RedefinirSenhaPage from './pages/RedefinirSenhaPage';
@@ -137,6 +138,7 @@ function App() {
             <Route path="/dashboard/cardapio/pagamento" element={<ProtectedRoute><CardapioPagamentoPage /></ProtectedRoute>} />
             <Route path="/dashboard/cardapio/whatsapp" element={<ProtectedRoute><CardapioWhatsappPage /></ProtectedRoute>} />
             <Route path="/dashboard/cardapio/itens" element={<ProtectedRoute><CardapioItensPage /></ProtectedRoute>} />
+            <Route path="/dashboard/cardapio/estoque" element={<ProtectedRoute><CardapioEstoquePage /></ProtectedRoute>} />
             <Route path="/dashboard/cardapio/pedidos" element={<ProtectedRoute><PedidosCardapioPage /></ProtectedRoute>} />
             <Route path="/dashboard/pedidos-agendados" element={<ProtectedRoute><PedidosAgendadosPage /></ProtectedRoute>} />
             <Route path="/dashboard/cardapio/relatorios" element={<ProtectedRoute><RelatoriosCardapioPage /></ProtectedRoute>} />
