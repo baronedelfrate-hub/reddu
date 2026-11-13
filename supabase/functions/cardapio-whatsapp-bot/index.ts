@@ -30,7 +30,8 @@ async function enviarTexto(baseUrl: string, instanceName: string, apiKey: string
   const resp = await fetch(`${cleanBaseUrl}/message/sendText/${encodeURIComponent(instanceName)}`, {
     method: 'POST',
     headers: { apikey: apiKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ number: numero, text: texto }),
+    // linkPreview:false — sem o cartão gigante (logo + título) que o WhatsApp abre embaixo do link.
+    body: JSON.stringify({ number: numero, text: texto, linkPreview: false }),
   });
   const data = await resp.json().catch(() => ({}));
   return { ok: resp.ok, data };
