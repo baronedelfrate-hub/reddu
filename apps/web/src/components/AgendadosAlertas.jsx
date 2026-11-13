@@ -13,6 +13,10 @@ import { imprimirCupomPedido, formatarDataHoraAgendamento } from '@/utils/cupomP
 //  2) Pedido agendado ACEITO, quando chega "X min antes" do horário marcado
 //     (parâmetro da loja, padrão 120 min): campainha repetindo + pop-up fixo
 //     até alguém clicar em "Iniciar produção" ou "Ciente" + impressão automática.
+//  3) Pedido agendado AINDA NÃO ACEITO (inclui PIX/cartão sem pagamento), no mesmo
+//     horário: campainha + pop-up pedindo para aceitar/resolver o pedido. Sem
+//     impressão automática (o pedido ainda não foi aceito). Some sozinho se o pedido
+//     for aceito, cancelado ou arquivado.
 // Parâmetros em empresas.cardapio_config (editáveis na tela Pedidos Agendados):
 //   agendados_antecedencia_min (padrão 120), agendados_alerta_som (padrão true),
 //   agendados_impressao_automatica (padrão true).
@@ -56,6 +60,7 @@ export default function AgendadosAlertas() {
 
   const [config, setConfig] = useState({});
   const [aceitos, setAceitos] = useState([]);
+  const [naoAceitos, setNaoAceitos] = useState([]);
   const [agora, setAgora] = useState(() => Date.now());
   const [dispensados, setDispensados] = useState(() => lerSet(LS_DISPENSADOS));
   const [falhaImpressao, setFalhaImpressao] = useState({});
@@ -123,6 +128,18 @@ export default function AgendadosAlertas() {
         .not('data_agendamento', 'is', null)
         .order('data_agendamento', { ascending: true });
       setAceitos(data || []);
+
+      // 3) Ainda não aceitos (o que já foi pago é aceito sozinho no passo 1)
+      const { data: pendentes } = await supabase
+        .from('pedidos_cardapio')
+        .select('id, numero_pedido, cliente_nome, data_agendamento, forma_pagamento_online, status_pagamento')
+        .eq('empresa_id', empresaId)
+        .eq('status', 'PENDENTE')
+        .eq('arquivado', false)
+        .is('aceito_em', null)
+        .not('data_agendamento', 'is', null)
+        .order('data_agendamento', { ascending: true });
+      setNaoAceitos((pendentes || []).filter((p) => p.status_pagamento !== 'pago'));
     } catch (e) {
       console.error('Erro ao buscar pedidos agendados:', e);
     }
@@ -136,6 +153,11 @@ export default function AgendadosAlertas() {
 
   const vencidos = aceitos.filter((p) => new Date(p.data_agendamento).getTime() - antecedenciaMin * 60000 <= agora);
   const alertasAtivos = vencidos.filter((p) => !dispensados.has(p.id));
+  const chaveNA = (id) => `na-${id}`;
+  const alertasNaoAceitos = naoAceitos.filter(
+    (p) => new Date(p.data_agendamento).getTime() - antecedenciaMin * 60000 <= agora && !dispensados.has(chaveNA(p.id)),
+  );
+  const totalAlertas = alertasAtivos.length + alertasNaoAceitos.length;
 
   // Impressão automática (uma vez por pedido, por aparelho)
   useEffect(() => {
@@ -152,11 +174,11 @@ export default function AgendadosAlertas() {
 
   // Campainha repetindo enquanto houver aviso sem resposta
   useEffect(() => {
-    if (!somAtivo || alertasAtivos.length === 0) return undefined;
+    if (!somAtivo || totalAlertas === 0) return undefined;
     tocarCampainha();
     const t = setInterval(tocarCampainha, 5000);
     return () => clearInterval(t);
-  }, [somAtivo, alertasAtivos.length]);
+  }, [somAtivo, totalAlertas]);
 
   const dispensar = (id) => {
     setDispensados((prev) => {
@@ -187,15 +209,54 @@ export default function AgendadosAlertas() {
     }
   };
 
-  if (alertasAtivos.length === 0) return null;
+  if (totalAlertas === 0) return null;
+
+  const textoQuando = (iso) => {
+    const minutos = Math.round((new Date(iso).getTime() - agora) / 60000);
+    const quando = minutos > 0
+      ? `faltam ${minutos >= 60 ? `${Math.floor(minutos / 60)}h${String(minutos % 60).padStart(2, '0')}` : `${minutos} min`}`
+      : `atrasado ${Math.abs(minutos)} min`;
+    return { minutos, quando };
+  };
 
   return (
     <div className="fixed top-4 right-4 z-[100] w-[380px] max-w-[calc(100vw-2rem)] space-y-3" role="alert" aria-live="assertive">
+      {alertasNaoAceitos.slice(0, 3).map((p) => {
+        const { minutos, quando } = textoQuando(p.data_agendamento);
+        const semPagamento = !!p.forma_pagamento_online;
+        return (
+          <div key={`na-${p.id}`} data-testid="alerta-agendado-nao-aceito" className={`rounded-xl border-2 shadow-2xl bg-white p-4 ${minutos <= 0 ? 'border-red-500' : 'border-amber-400'}`}>
+            <div className="flex items-start gap-3">
+              <div className={`p-2 rounded-lg text-white ${minutos <= 0 ? 'bg-red-500' : 'bg-amber-500'}`}>
+                <BellRing className="h-5 w-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-black text-gray-900 leading-tight">Pedido #{p.numero_pedido} — agendado, ainda não aceito</p>
+                <p className="text-sm text-gray-700 mt-0.5 truncate">{p.cliente_nome}</p>
+                <p className="text-sm font-semibold text-gray-900 flex items-center gap-1 mt-1">
+                  <CalendarClock className="h-4 w-4" /> {formatarDataHoraAgendamento(p.data_agendamento)}
+                  <span className={`ml-1 text-xs font-bold ${minutos <= 0 ? 'text-red-600' : 'text-amber-600'}`}>({quando})</span>
+                </p>
+                <p className="text-xs text-gray-600 mt-1">
+                  {semPagamento
+                    ? `Pagamento ${String(p.forma_pagamento_online).toUpperCase()} ainda não confirmado. Aceite o pedido ou fale com o cliente.`
+                    : 'Aceite o pedido para ele entrar na produção.'}
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2 mt-3">
+              <Button size="sm" className="gap-1.5 font-bold" onClick={() => navigate('/dashboard/pedidos-agendados')}>
+                <CalendarClock className="h-4 w-4" /> Abrir agendados
+              </Button>
+              <Button size="sm" variant="ghost" className="gap-1.5 text-gray-600" onClick={() => dispensar(chaveNA(p.id))}>
+                <Check className="h-4 w-4" /> Ciente
+              </Button>
+            </div>
+          </div>
+        );
+      })}
       {alertasAtivos.slice(0, 3).map((p) => {
-        const minutos = Math.round((new Date(p.data_agendamento).getTime() - agora) / 60000);
-        const quando = minutos > 0
-          ? `faltam ${minutos >= 60 ? `${Math.floor(minutos / 60)}h${String(minutos % 60).padStart(2, '0')}` : `${minutos} min`}`
-          : `atrasado ${Math.abs(minutos)} min`;
+        const { minutos, quando } = textoQuando(p.data_agendamento);
         return (
           <div key={p.id} className={`rounded-xl border-2 shadow-2xl bg-white p-4 ${minutos <= 0 ? 'border-red-500' : 'border-amber-400'}`}>
             <div className="flex items-start gap-3">
@@ -228,9 +289,9 @@ export default function AgendadosAlertas() {
           </div>
         );
       })}
-      {alertasAtivos.length > 3 && (
+      {(alertasAtivos.length > 3 || alertasNaoAceitos.length > 3) && (
         <p className="text-xs text-center font-semibold text-white bg-gray-800/90 rounded-lg py-1">
-          + {alertasAtivos.length - 3} pedido(s) agendado(s) aguardando
+          + {Math.max(0, alertasAtivos.length - 3) + Math.max(0, alertasNaoAceitos.length - 3)} pedido(s) agendado(s) aguardando
         </p>
       )}
     </div>
