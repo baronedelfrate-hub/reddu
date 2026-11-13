@@ -1810,6 +1810,11 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
   const descricaoLoja = empresa?.cardapio_config?.descricao_loja || null;
   const rodape = empresa?.cardapio_config?.rodape || null;
   const enderecoLoja = empresa?.cardapio_config?.endereco || null;
+  const razaoSocialLoja = empresa?.cardapio_config?.razao_social || null;
+  const cnpjLoja = (() => {
+    const d = String(empresa?.cardapio_config?.cnpj || '').replace(/\D/g, '');
+    return d.length === 14 ? d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5') : null;
+  })();
   const taxaEntregaTabela = empresa?.cardapio_config?.taxa_entrega?.tabela || [];
   const valorMinimoEntrega = Number(empresa?.cardapio_config?.valor_minimo_entrega) || 0;
   const tempoPreparo = empresa?.cardapio_config?.tempo_preparo || {};
@@ -3076,6 +3081,11 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
                 </section>
               ))}
 
+              {(razaoSocialLoja || cnpjLoja) && (
+                <p className="pt-4 text-center text-xs text-gray-400" data-testid="identificacao-empresa">
+                  {[razaoSocialLoja, cnpjLoja && `CNPJ ${cnpjLoja}`].filter(Boolean).join(' · ')}
+                </p>
+              )}
               {rodape && (() => {
                 const { contatos, resto } = analisarRodape(rodape);
                 return (
@@ -3146,6 +3156,17 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
               </div>
             )}
 
+            {(razaoSocialLoja || cnpjLoja) && (
+              <div className="bg-white border rounded-xl overflow-hidden" data-testid="perfil-empresa">
+                <div className="bg-gray-100 px-4 py-2 flex items-center gap-2 font-bold text-gray-900">
+                  <Store className="h-4 w-4" /> Dados da empresa
+                </div>
+                <div className="px-4 py-3 text-sm text-gray-700 space-y-1">
+                  {razaoSocialLoja && <p><span className="text-gray-500">Razão social: </span><b>{razaoSocialLoja}</b></p>}
+                  {cnpjLoja && <p><span className="text-gray-500">CNPJ: </span><b>{cnpjLoja}</b></p>}
+                </div>
+              </div>
+            )}
             {enderecoLoja && (
               <div className="bg-white border rounded-xl overflow-hidden">
                 <div className="bg-gray-100 px-4 py-2 flex items-center gap-2 font-bold text-gray-900">

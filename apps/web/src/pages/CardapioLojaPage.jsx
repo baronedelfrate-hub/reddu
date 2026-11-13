@@ -35,6 +35,8 @@ export default function CardapioLojaPage() {
   const [iconeAppFile, setIconeAppFile] = useState(null);
   const [descricaoLoja, setDescricaoLoja] = useState('');
   const [rodape, setRodape] = useState('');
+  const [razaoSocial, setRazaoSocial] = useState('');
+  const [cnpj, setCnpj] = useState('');
   const [esgotadoOculta, setEsgotadoOculta] = useState(true);
   const [endereco, setEndereco] = useState('');
   const FORMAS_PAGAMENTO_OPCOES = ['Dinheiro na entrega', 'Cartão na entrega', 'PIX'];
@@ -60,6 +62,8 @@ export default function CardapioLojaPage() {
       setIconeAppUrl(empresaRes.data?.cardapio_config?.icone_app_url || '');
       setDescricaoLoja(empresaRes.data?.cardapio_config?.descricao_loja || '');
       setRodape(empresaRes.data?.cardapio_config?.rodape || '');
+      setRazaoSocial(empresaRes.data?.cardapio_config?.razao_social || '');
+      setCnpj(empresaRes.data?.cardapio_config?.cnpj || '');
       setEsgotadoOculta(empresaRes.data?.cardapio_config?.esgotado_comportamento !== 'mostrar_desabilitado');
       setEndereco(empresaRes.data?.cardapio_config?.endereco || '');
       setFormasPagamento(empresaRes.data?.cardapio_config?.formas_pagamento || []);
@@ -115,7 +119,21 @@ export default function CardapioLojaPage() {
     }
   };
 
+  // CNPJ com dígitos verificadores corretos (opcional: vazio é aceito)
+  const cnpjValido = (v) => {
+    const d = String(v || '').replace(/\D/g, '');
+    if (d.length !== 14 || /^(\d)\1{13}$/.test(d)) return false;
+    const dig = (n) => { const pesos = n === 12 ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2] : [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]; let t = 0; for (let i = 0; i < n; i += 1) t += Number(d[i]) * pesos[i]; const r = t % 11; return r < 2 ? 0 : 11 - r; };
+    return dig(12) === Number(d[12]) && dig(13) === Number(d[13]);
+  };
+  const mascaraCnpj = (v) => String(v || '').replace(/\D/g, '').slice(0, 14)
+    .replace(/^(\d{2})(\d)/, '$1.$2').replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3').replace(/\.(\d{3})(\d)/, '.$1/$2').replace(/(\d{4})(\d)/, '$1-$2');
+
   const handleSaveAparencia = async () => {
+    if (cnpj.replace(/\D/g, '') !== '' && !cnpjValido(cnpj)) {
+      toast({ title: 'CNPJ inválido', description: 'Confira os 14 números ou deixe o campo em branco.', variant: 'destructive' });
+      return;
+    }
     setSavingAparencia(true);
     try {
       let novaCapaUrl = capaUrl;
@@ -147,6 +165,8 @@ export default function CardapioLojaPage() {
         icone_app_url: novoIconeAppUrl || null,
         descricao_loja: descricaoLoja.trim() || null,
         rodape: rodape.trim() || null,
+        razao_social: razaoSocial.trim() || null,
+        cnpj: cnpj.replace(/\D/g, '') || null,
         esgotado_comportamento: esgotadoOculta ? 'ocultar' : 'mostrar_desabilitado',
         endereco: endereco.trim() || null,
         formas_pagamento: formasPagamento,
@@ -310,6 +330,24 @@ export default function CardapioLojaPage() {
               onChange={(e) => setDescricaoLoja(e.target.value)}
               placeholder="Ex: Os melhores salgados artesanais de Indaiatuba!"
             />
+          </div>
+
+          <div>
+            <Label htmlFor="razao-social-loja" className="text-gray-900">Razão social</Label>
+            <Input
+              id="razao-social-loja" value={razaoSocial} maxLength={120}
+              onChange={(e) => setRazaoSocial(e.target.value)}
+              placeholder="Ex: FL Indústria de Produtos Congelados Ltda"
+            />
+          </div>
+          <div>
+            <Label htmlFor="cnpj-loja" className="text-gray-900">CNPJ</Label>
+            <Input
+              id="cnpj-loja" inputMode="numeric" value={mascaraCnpj(cnpj)}
+              onChange={(e) => setCnpj(e.target.value.replace(/\D/g, '').slice(0, 14))}
+              placeholder="00.000.000/0000-00"
+            />
+            <p className="text-xs text-gray-400 mt-1">Razão social e CNPJ aparecem no rodapé e no Perfil da loja do cardápio (a Cielo e os clientes costumam pedir essa identificação).</p>
           </div>
 
           <div>
