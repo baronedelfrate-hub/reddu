@@ -65,6 +65,46 @@ async function registrarSaida(serviceClient: any, empresaId: string, jid: string
   }
 }
 
+// Pausa o bot nessa conversa, confirma pro cliente e DEPOIS marca o pedido de
+// atendente (dispara o alarme). Usada quando o cliente digita "atendente" e
+// quando a IA decide encaminhar para um humano.
+async function pedirAtendente(
+  serviceClient: any,
+  config: { base_url: string; instance_name: string },
+  evolutionApiKey: string,
+  empresaId: string,
+  telefoneJid: string,
+  numeroLimpo: string,
+) {
+  await serviceClient
+    .from('whatsapp_conversas')
+    .update({ bot_pausado: true, bot_pausado_em: new Date().toISOString(), bot_retorno_em: null })
+    .eq('empresa_id', empresaId)
+    .eq('telefone_jid', telefoneJid);
+
+  const { data: empresaAtendente } = await serviceClient
+    .from('empresas')
+    .select('cardapio_config')
+    .eq('id', empresaId)
+    .maybeSingle();
+
+  const texto = empresaAtendente?.cardapio_config?.whatsapp_mensagem_atendente?.trim()
+    || 'Beleza! Já vou chamar um atendente pra te ajudar por aqui mesmo. 🙋';
+  const envio = await enviarTexto(config.base_url, config.instance_name, evolutionApiKey, numeroLimpo, texto);
+
+  if (envio.ok) {
+    await registrarSaida(serviceClient, empresaId, telefoneJid, texto, envio.data);
+  }
+
+  // Só AGORA marca o pedido de atendente (depois da mensagem do robô, pra ela
+  // não ser confundida com resposta de humano).
+  await serviceClient
+    .from('whatsapp_conversas')
+    .update({ atendente_solicitado_em: new Date().toISOString(), atendente_assumido_em: null })
+    .eq('empresa_id', empresaId)
+    .eq('telefone_jid', telefoneJid);
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -110,34 +150,7 @@ Deno.serve(async (req) => {
 
     // Cliente pediu atendente: pausa o bot nessa conversa, confirma e dispara o alarme.
     if (textoLower.includes('atendente')) {
-      await serviceClient
-        .from('whatsapp_conversas')
-        .update({ bot_pausado: true, bot_pausado_em: new Date().toISOString(), bot_retorno_em: null })
-        .eq('empresa_id', empresa_id)
-        .eq('telefone_jid', telefone_jid);
-
-      const { data: empresaAtendente } = await serviceClient
-        .from('empresas')
-        .select('cardapio_config')
-        .eq('id', empresa_id)
-        .maybeSingle();
-
-      const texto = empresaAtendente?.cardapio_config?.whatsapp_mensagem_atendente?.trim()
-        || 'Beleza! Já vou chamar um atendente pra te ajudar por aqui mesmo. 🙋';
-      const envio = await enviarTexto(config.base_url, config.instance_name, evolutionApiKey, numeroLimpo, texto);
-
-      if (envio.ok) {
-        await registrarSaida(serviceClient, empresa_id, telefone_jid, texto, envio.data);
-      }
-
-      // Só AGORA marca o pedido de atendente (depois da mensagem do robô, pra ela
-      // não ser confundida com resposta de humano).
-      await serviceClient
-        .from('whatsapp_conversas')
-        .update({ atendente_solicitado_em: new Date().toISOString(), atendente_assumido_em: null })
-        .eq('empresa_id', empresa_id)
-        .eq('telefone_jid', telefone_jid);
-
+      await pedirAtendente(serviceClient, config, evolutionApiKey, empresa_id, telefone_jid, numeroLimpo);
       return jsonResponse({ ok: true, acao: 'pausou_bot' });
     }
 
@@ -226,7 +239,50 @@ Deno.serve(async (req) => {
         .maybeSingle();
 
       if (jaEnviada?.id) {
-        return jsonResponse({ ok: true, skipped: 'boas-vindas já enviada recentemente' });
+        // Boas-vindas já foi: se a loja ligou as respostas com IA, é ela quem atende.
+        if (!empresa.cardapio_config?.whatsapp_ia_ativa) {
+          return jsonResponse({ ok: true, skipped: 'boas-vindas já enviada recentemente' });
+        }
+
+        let decisao: { acao?: string; resposta?: string } | null = null;
+        try {
+          const iaResp = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/cardapio-whatsapp-ia`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`,
+              apikey: Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+            },
+            body: JSON.stringify({ empresa_id, telefone_jid, texto_recebido: texto_recebido || '' }),
+            signal: AbortSignal.timeout(25000),
+          });
+          decisao = iaResp.ok ? await iaResp.json().catch(() => null) : null;
+        } catch (e) {
+          console.error('[cardapio-whatsapp-bot] erro ao chamar a IA:', e);
+        }
+
+        // IA fora do ar ou resposta inválida: o cliente não fica no vácuo.
+        if (!decisao?.acao) {
+          await pedirAtendente(serviceClient, config, evolutionApiKey, empresa_id, telefone_jid, numeroLimpo);
+          return jsonResponse({ ok: true, acao: 'ia_falhou_chamou_atendente' });
+        }
+
+        if (decisao.acao === 'chamar_atendente') {
+          await pedirAtendente(serviceClient, config, evolutionApiKey, empresa_id, telefone_jid, numeroLimpo);
+          return jsonResponse({ ok: true, acao: 'ia_chamou_atendente' });
+        }
+
+        if (decisao.acao === 'responder' && decisao.resposta) {
+          const envioIa = await enviarTexto(config.base_url, config.instance_name, evolutionApiKey, numeroLimpo, decisao.resposta);
+          if (!envioIa.ok) {
+            console.error('[cardapio-whatsapp-bot] erro ao enviar resposta da IA:', envioIa.data);
+            return jsonResponse({ ok: false, error: 'falha ao enviar resposta da IA' });
+          }
+          await registrarSaida(serviceClient, empresa_id, telefone_jid, decisao.resposta, envioIa.data);
+          return jsonResponse({ ok: true, acao: 'ia_respondeu' });
+        }
+
+        return jsonResponse({ ok: true, skipped: 'IA decidiu não responder' });
       }
     }
 

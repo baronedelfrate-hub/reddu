@@ -31,6 +31,9 @@ export default function CardapioWhatsappPage() {
   const [alarmeAtendente, setAlarmeAtendente] = useState(true);
   const [mensagemBoasVindas, setMensagemBoasVindas] = useState('');
   const [mensagemAtendente, setMensagemAtendente] = useState('');
+  const [iaAtiva, setIaAtiva] = useState(false);
+  const [iaOrientacoes, setIaOrientacoes] = useState('');
+  const [iaLimiteDia, setIaLimiteDia] = useState('');
   const [msgRecebido, setMsgRecebido] = useState('');
   const [msgConfirmado, setMsgConfirmado] = useState('');
   const [msgEmPreparo, setMsgEmPreparo] = useState('');
@@ -74,6 +77,9 @@ export default function CardapioWhatsappPage() {
       setAlarmeAtendente(c.whatsapp_alarme_atendente !== false);
       setMensagemBoasVindas(c.whatsapp_mensagem_boas_vindas || '');
       setMensagemAtendente(c.whatsapp_mensagem_atendente || '');
+      setIaAtiva(!!c.whatsapp_ia_ativa);
+      setIaOrientacoes(c.whatsapp_ia_orientacoes || '');
+      setIaLimiteDia(c.whatsapp_ia_limite_dia != null ? String(c.whatsapp_ia_limite_dia) : '');
       setMsgRecebido(c.whatsapp_msg_recebido || '');
       setMsgConfirmado(c.whatsapp_msg_confirmado || '');
       setMsgEmPreparo(c.whatsapp_msg_em_preparo || '');
@@ -118,6 +124,9 @@ export default function CardapioWhatsappPage() {
         whatsapp_alarme_atendente: alarmeAtendente,
         whatsapp_mensagem_boas_vindas: mensagemBoasVindas.trim() || null,
         whatsapp_mensagem_atendente: mensagemAtendente.trim() || null,
+        whatsapp_ia_ativa: iaAtiva,
+        whatsapp_ia_orientacoes: iaOrientacoes.trim() || null,
+        whatsapp_ia_limite_dia: iaLimiteDia !== '' ? Math.max(1, parseInt(iaLimiteDia, 10) || 20) : null,
         whatsapp_msg_recebido: msgRecebido.trim() || null,
         whatsapp_msg_confirmado: msgConfirmado.trim() || null,
         whatsapp_notif_confirmado_ativo: notifConfirmadoAtivo,
@@ -284,6 +293,42 @@ export default function CardapioWhatsappPage() {
                 placeholder="Beleza! Já vou chamar um atendente pra te ajudar por aqui mesmo. 🙋"
               />
               <p className="text-xs text-gray-400 mt-1">Enviada quando o cliente digita "atendente". Deixe em branco pra usar a padrão.</p>
+            </div>
+          )}
+
+          {whatsappBotAtivo && (
+            <div className="space-y-3 border rounded-lg p-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-gray-900">Respostas com IA</Label>
+                  <p className="text-xs text-gray-400">Depois da boas-vindas, a IA responde dúvidas do cliente (status do pedido, prazo, cardápio, preços, endereço, horário) só com dados reais da loja. Não faz pedido nem cancela. Em reclamação, reembolso ou dúvida que não souber, chama um atendente.</p>
+                </div>
+                <Switch checked={iaAtiva} onCheckedChange={setIaAtiva} />
+              </div>
+              {iaAtiva && (
+                <>
+                  <div>
+                    <Label htmlFor="ia-orientacoes" className="text-gray-900">Orientações extras para a IA (opcional)</Label>
+                    <Textarea
+                      id="ia-orientacoes" rows={3}
+                      value={iaOrientacoes}
+                      onChange={(e) => setIaOrientacoes(e.target.value)}
+                      placeholder="Ex: Hoje temos promoção de 100 coxinhas. Não aceitamos encomendas para o mesmo dia após as 16h."
+                    />
+                    <p className="text-xs text-gray-400 mt-1">Tom descontraído já é o padrão. Escreva aqui avisos, promoções ou regras da loja que a IA deve considerar.</p>
+                  </div>
+                  <div>
+                    <Label htmlFor="ia-limite" className="text-gray-900">Máximo de respostas da IA por cliente a cada 24h</Label>
+                    <Input
+                      id="ia-limite" type="number" min="1" step="1"
+                      value={iaLimiteDia}
+                      onChange={(e) => setIaLimiteDia(e.target.value)}
+                      placeholder="20"
+                    />
+                    <p className="text-xs text-gray-400 mt-1">Passou do limite, o cliente é encaminhado para um atendente. Padrão: 20.</p>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
