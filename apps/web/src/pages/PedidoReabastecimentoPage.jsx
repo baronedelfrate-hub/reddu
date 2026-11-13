@@ -602,7 +602,8 @@ export default function PedidoReabastecimentoPage() {
   // aplica igual em pedido novo e em pedido antigo já salvo, porque só
   // olha pro texto/produto de cada linha na hora de mostrar, não muda o
   // que está gravado.
-  const ehLinhaDeTroca = (item) => /troca|substitui/i.test(item?.produto_nome || '');
+  // Desconto manual ("(−) Desconto: ...") nunca é linha de troca, mesmo que o motivo digitado fale em "troca".
+  const ehLinhaDeTroca = (item) => !String(item?.produto_nome || '').startsWith('(−) Desconto: ') && /troca|substitui/i.test(item?.produto_nome || '');
   // Pedido do Fernando (mercado com mais de uma visita no período): agrupa
   // primeiro por visita (`visita_em`, na ordem em que aconteceram), e só
   // dentro de cada visita aplica a regra de sempre (troca centralizada no
@@ -1309,9 +1310,9 @@ export default function PedidoReabastecimentoPage() {
         .select(`
           id, data_inicio, data_fim, status, valor_total, gerado_em, baixado_em,
           pedidos_reabastecimento_mercados(
-            id, valor_total, locais(nome),
+            id, valor_total, venda_id, locais(nome),
             status_fiscal, nfe_id, nfe_chave, nfe_url_pdf, nfe_erro_mensagem, cpf_cnpj_utilizado, email_enviado_para,
-            pedidos_reabastecimento_itens(produto_id, produto_nome, quantidade, valor_unitario, valor_total, visita_em)
+            pedidos_reabastecimento_itens(id, produto_id, produto_nome, quantidade, valor_unitario, valor_total, visita_em)
           )
         `)
         .eq('id', pedidoResumo.id)
@@ -1337,6 +1338,104 @@ export default function PedidoReabastecimentoPage() {
 
   const [confirmandoExclusao, setConfirmandoExclusao] = useState(false);
   const [isExcluindo, setIsExcluindo] = useState(false);
+
+  // ─── Desconto manual por mercado ───────────────────────────────────────
+  // Ex.: o mercadinho já pagou com um desconto combinado na hora (trocas) e a nota fiscal
+  // precisa sair com o valor certo. Entra como linha NEGATIVA sem produto — a NF já trata
+  // esse tipo de linha como crédito geral (rateado nos itens), igual ao crédito de troca.
+  // Só vale antes de emitir a nota e dar baixa.
+  const PREFIXO_DESCONTO_MANUAL = '(−) Desconto: ';
+  const ehDescontoManual = (item) => !item?.produto_id && String(item?.produto_nome || '').startsWith(PREFIXO_DESCONTO_MANUAL);
+  const nfBloqueiaDesconto = (m) => !!m.nfe_chave || ['emitido', 'success', 'pendente', 'emitting'].includes(m.status_fiscal);
+  const [descontoPorMercado, setDescontoPorMercado] = useState({});
+  const [aplicandoDescontoId, setAplicandoDescontoId] = useState(null);
+
+  const lerValorBR = (txt) => {
+    const t = String(txt || '').trim();
+    if (!t) return NaN;
+    const normal = t.includes(',') ? t.replace(/\./g, '').replace(',', '.') : t;
+    return Math.round(parseFloat(normal) * 100) / 100;
+  };
+
+  // Atualiza totais do mercado, do pedido e da venda ligada a ele (delta negativo = desconto).
+  const ajustarTotaisPedido = async (m, delta) => {
+    const novoMercado = Math.round((parseFloat(m.valor_total) + delta) * 100) / 100;
+    const novoPedido = Math.round((parseFloat(pedidoAberto.valor_total) + delta) * 100) / 100;
+    const { error: e1 } = await supabase.from('pedidos_reabastecimento_mercados').update({ valor_total: novoMercado }).eq('id', m.id);
+    if (e1) throw e1;
+    const { error: e2 } = await supabase.from('pedidos_reabastecimento').update({ valor_total: novoPedido }).eq('id', pedidoAberto.id);
+    if (e2) throw e2;
+    if (m.venda_id) {
+      const { error: e3 } = await supabase.from('vendas').update({ total_final: novoMercado }).eq('id', m.venda_id);
+      if (e3) throw e3;
+    }
+  };
+
+  const aplicarDescontoManual = async (m) => {
+    const form = descontoPorMercado[m.id] || {};
+    const valor = lerValorBR(form.valor);
+    const motivo = String(form.motivo || '').trim();
+    const totalMercado = parseFloat(m.valor_total) || 0;
+    if (!(valor > 0)) { toast({ title: 'Informe o valor do desconto', variant: 'destructive' }); return; }
+    if (valor > totalMercado + 0.005) {
+      toast({ title: 'Desconto maior que o subtotal do mercado', description: `O máximo é ${fmt(totalMercado)}.`, variant: 'destructive' });
+      return;
+    }
+    if (!motivo) { toast({ title: 'Informe o motivo do desconto', description: 'Ele aparece no pedido e na nota.', variant: 'destructive' }); return; }
+    if (nfBloqueiaDesconto(m)) { toast({ title: 'A nota fiscal deste mercado já foi emitida', variant: 'destructive' }); return; }
+
+    setAplicandoDescontoId(m.id);
+    let itemCriadoId = null;
+    try {
+      const visitas = (m.pedidos_reabastecimento_itens || []).map((i) => i.visita_em).filter(Boolean).sort();
+      const { data: criado, error: erroItem } = await supabase.from('pedidos_reabastecimento_itens').insert({
+        pedido_mercado_id: m.id,
+        produto_id: null,
+        produto_nome: `${PREFIXO_DESCONTO_MANUAL}${motivo.slice(0, 120)}`,
+        quantidade: 1,
+        valor_unitario: -valor,
+        valor_total: -valor,
+        visita_em: visitas.length ? visitas[visitas.length - 1] : null,
+      }).select('id').single();
+      if (erroItem) throw erroItem;
+      itemCriadoId = criado?.id || null;
+
+      await ajustarTotaisPedido(m, -valor);
+
+      toast({ title: 'Desconto aplicado!', description: `${fmt(valor)} abatidos de ${m.locais?.nome || 'o mercado'}.`, className: 'bg-emerald-600 text-white' });
+      setDescontoPorMercado((prev) => ({ ...prev, [m.id]: { valor: '', motivo: '' } }));
+      await abrirDetalhePedido({ id: pedidoAberto.id });
+    } catch (err) {
+      // desfaz o que já tinha sido gravado, pra não deixar linha sem total (ou o contrário)
+      if (itemCriadoId) {
+        await supabase.from('pedidos_reabastecimento_itens').delete().eq('id', itemCriadoId);
+        await supabase.from('pedidos_reabastecimento_mercados').update({ valor_total: m.valor_total }).eq('id', m.id);
+        await supabase.from('pedidos_reabastecimento').update({ valor_total: pedidoAberto.valor_total }).eq('id', pedidoAberto.id);
+        if (m.venda_id) await supabase.from('vendas').update({ total_final: m.valor_total }).eq('id', m.venda_id);
+      }
+      toast({ title: 'Erro ao aplicar o desconto', description: err.message, variant: 'destructive' });
+    } finally {
+      setAplicandoDescontoId(null);
+    }
+  };
+
+  const removerDescontoManual = async (m, item) => {
+    if (!item?.id || !ehDescontoManual(item)) return;
+    if (nfBloqueiaDesconto(m)) { toast({ title: 'A nota fiscal deste mercado já foi emitida', variant: 'destructive' }); return; }
+    const valor = Math.abs(parseFloat(item.valor_total) || 0);
+    setAplicandoDescontoId(m.id);
+    try {
+      const { error } = await supabase.from('pedidos_reabastecimento_itens').delete().eq('id', item.id);
+      if (error) throw error;
+      await ajustarTotaisPedido(m, valor);
+      toast({ title: 'Desconto removido' });
+      await abrirDetalhePedido({ id: pedidoAberto.id });
+    } catch (err) {
+      toast({ title: 'Erro ao remover o desconto', description: err.message, variant: 'destructive' });
+    } finally {
+      setAplicandoDescontoId(null);
+    }
+  };
 
   // ─── NF por mercado (Faturamento de Reabastecimento) ───────────────────
   // Estado por mercado.id — o CPF/CNPJ e o e-mail são digitados na hora,
@@ -2079,7 +2178,19 @@ export default function PedidoReabastecimentoPage() {
                                 </tr>
                               )}
                               <tr>
-                                <td className="px-3 py-2 text-gray-800">{item.produto_nome}</td>
+                                <td className="px-3 py-2 text-gray-800">
+                                  {item.produto_nome}
+                                  {aba === 'pendentes' && pedidoAberto.status === 'gerado' && ehDescontoManual(item) && !nfBloqueiaDesconto(m) && (
+                                    <button
+                                      type="button" aria-label="Remover desconto" title="Remover este desconto"
+                                      disabled={aplicandoDescontoId === m.id}
+                                      onClick={() => removerDescontoManual(m, item)}
+                                      className="ml-2 inline-flex align-middle text-gray-400 hover:text-red-600"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  )}
+                                </td>
                                 <td className="px-3 py-2 text-right text-gray-600">{item.quantidade}</td>
                                 <td className="px-3 py-2 text-right font-semibold text-gray-900">{fmt(item.valor_total)}</td>
                               </tr>
@@ -2094,6 +2205,34 @@ export default function PedidoReabastecimentoPage() {
                       ? <span className="text-sm font-bold text-red-700">Saldo a favor do mercado: {fmt(m.valor_total)} (desconta do total)</span>
                       : <span className="text-sm font-bold text-blue-700">Subtotal: {fmt(m.valor_total)}</span>}
                   </div>
+
+                  {aba === 'pendentes' && pedidoAberto.status === 'gerado' && (
+                    nfBloqueiaDesconto(m) ? (
+                      <p className="text-xs text-gray-400">Nota fiscal já emitida: não é mais possível aplicar desconto neste mercado.</p>
+                    ) : (
+                      <div className="border border-dashed border-gray-200 rounded-xl p-3 space-y-2" data-testid="desconto-mercado">
+                        <p className="text-xs font-semibold text-gray-500 uppercase">Desconto manual (ex.: trocas acertadas na hora do pagamento)</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-[150px_1fr_auto] gap-2">
+                          <Input
+                            inputMode="decimal" placeholder="Valor (R$)" aria-label="Valor do desconto"
+                            value={descontoPorMercado[m.id]?.valor || ''}
+                            onChange={(e) => setDescontoPorMercado((prev) => ({ ...prev, [m.id]: { ...prev[m.id], valor: e.target.value } }))}
+                          />
+                          <Input
+                            placeholder="Motivo (ex.: trocas acertadas no pagamento)" aria-label="Motivo do desconto" maxLength={120}
+                            value={descontoPorMercado[m.id]?.motivo || ''}
+                            onChange={(e) => setDescontoPorMercado((prev) => ({ ...prev, [m.id]: { ...prev[m.id], motivo: e.target.value } }))}
+                          />
+                          <Button size="sm" disabled={aplicandoDescontoId === m.id} onClick={() => aplicarDescontoManual(m)}>
+                            {aplicandoDescontoId === m.id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Aplicar desconto'}
+                          </Button>
+                        </div>
+                        <p className="text-[11px] text-gray-400">
+                          Entra como linha negativa: reduz o subtotal do mercado e o total do pedido e vai na nota fiscal e no PDF. Só vale antes de emitir a nota e dar baixa.
+                        </p>
+                      </div>
+                    )
+                  )}
 
                   {/* Emissão de NF + envio por e-mail, por mercado */}
                   <div className="bg-gray-50 border border-gray-100 rounded-xl p-4 space-y-3">
