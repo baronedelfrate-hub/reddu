@@ -712,7 +712,7 @@ export default function CardapioItensPage() {
                 onChange={(e) => setReservaEmMassa(e.target.value)}
               >
                 <option value="">Escolha o local</option>
-                {locais.map((l) => <option key={l.id} value={l.id}>{l.nome}</option>)}
+                {locais.filter((l) => !localCentral || l.id === localCentral.id).map((l) => <option key={l.id} value={l.id}>{l.nome}</option>)}
               </select>
             </div>
             <Button size="sm" disabled={!reservaEscolhida || aplicandoReserva} onClick={() => aplicarReservaEmMassa(reservaEscolhida)}>
@@ -946,7 +946,10 @@ export default function CardapioItensPage() {
                 onChange={(e) => setItemForm((f) => ({ ...f, local_reserva_id: e.target.value }))}
               >
                 <option value="">Sem reserva</option>
-                {locais.filter((l) => l.id !== itemForm.local_id).map((l) => <option key={l.id} value={l.id}>{l.nome}</option>)}
+                {locais
+                  .filter((l) => l.id !== itemForm.local_id)
+                  .filter((l) => !localCentral || l.id === localCentral.id || l.id === itemForm.local_reserva_id)
+                  .map((l) => <option key={l.id} value={l.id}>{l.nome}</option>)}
               </select>
               <p className="text-xs text-gray-400 mt-1">
                 Se faltar no estoque principal, o pedido completa com este estoque (o principal é usado primeiro). O item só fica "Esgotado" quando zerar nos dois.
