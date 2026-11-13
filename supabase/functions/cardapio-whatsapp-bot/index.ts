@@ -203,6 +203,33 @@ Deno.serve(async (req) => {
       .replaceAll('{nome}', empresa.nome)
       .replaceAll('{link}', link);
 
+    // Não repete a boas-vindas a cada mensagem do cliente: só reenvia se a última
+    // boas-vindas dessa conversa for mais antiga que o intervalo (padrão 12h).
+    const intervaloHoras = Number(empresa.cardapio_config?.whatsapp_bot_boas_vindas_horas) || 12;
+    const limite = new Date(Date.now() - intervaloHoras * 60 * 60 * 1000).toISOString();
+    const { data: conversaBoasVindas } = await serviceClient
+      .from('whatsapp_conversas')
+      .select('id')
+      .eq('empresa_id', empresa_id)
+      .eq('telefone_jid', telefone_jid)
+      .maybeSingle();
+
+    if (conversaBoasVindas?.id) {
+      const { data: jaEnviada } = await serviceClient
+        .from('whatsapp_mensagens')
+        .select('id')
+        .eq('conversa_id', conversaBoasVindas.id)
+        .eq('from_me', true)
+        .eq('conteudo', texto)
+        .gte('timestamp_mensagem', limite)
+        .limit(1)
+        .maybeSingle();
+
+      if (jaEnviada?.id) {
+        return jsonResponse({ ok: true, skipped: 'boas-vindas já enviada recentemente' });
+      }
+    }
+
     const envio = await enviarTexto(config.base_url, config.instance_name, evolutionApiKey, numeroLimpo, texto);
     if (!envio.ok) {
       console.error('[cardapio-whatsapp-bot] erro ao enviar:', envio.data);
