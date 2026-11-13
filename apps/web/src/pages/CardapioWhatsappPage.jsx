@@ -58,6 +58,7 @@ export default function CardapioWhatsappPage() {
   const [alertasResumoDiarioHorario, setAlertasResumoDiarioHorario] = useState('23:00');
   const [alertasPedidoParadoAtivo, setAlertasPedidoParadoAtivo] = useState(true);
   const [alertasErroFiscalAtivo, setAlertasErroFiscalAtivo] = useState(true);
+  const [alertasEstoqueAtivo, setAlertasEstoqueAtivo] = useState(true);
   const [savingAlertas, setSavingAlertas] = useState(false);
 
   const loadData = useCallback(async () => {
@@ -102,6 +103,7 @@ export default function CardapioWhatsappPage() {
       setAlertasResumoDiarioHorario(ag.resumo_diario_horario || '23:00');
       setAlertasPedidoParadoAtivo(ag.pedido_parado_ativo !== false);
       setAlertasErroFiscalAtivo(ag.erro_fiscal_ativo !== false);
+      setAlertasEstoqueAtivo(ag.estoque_baixo_ativo !== false);
     } catch (error) {
       console.error('Erro ao carregar WhatsApp do cardápio:', error);
       toast({ title: 'Erro ao carregar', description: error.message, variant: 'destructive' });
@@ -173,6 +175,7 @@ export default function CardapioWhatsappPage() {
           resumo_diario_horario: alertasResumoDiarioHorario,
           pedido_parado_ativo: alertasPedidoParadoAtivo,
           erro_fiscal_ativo: alertasErroFiscalAtivo,
+          estoque_baixo_ativo: alertasEstoqueAtivo,
         },
       };
       const { error } = await supabase.from('empresas').update({ cardapio_config: novoConfig }).eq('id', empresaId);
@@ -495,6 +498,14 @@ export default function CardapioWhatsappPage() {
                     <p className="text-xs text-gray-400">Avisa quando a emissão da NFC-e de um pedido falha.</p>
                   </div>
                   <Switch checked={alertasErroFiscalAtivo} onCheckedChange={setAlertasErroFiscalAtivo} />
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t">
+                  <div>
+                    <Label className="text-gray-900 text-sm">Estoque baixo no cardápio</Label>
+                    <p className="text-xs text-gray-400">Avisa quando um item do cardápio chega ao estoque mínimo ou esgota. O limite é definido em Estoque do Cardápio.</p>
+                  </div>
+                  <Switch checked={alertasEstoqueAtivo} onCheckedChange={setAlertasEstoqueAtivo} />
                 </div>
               </div>
             </>
