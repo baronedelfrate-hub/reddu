@@ -423,6 +423,10 @@ Deno.serve(async (req) => {
             headers: {
               'Content-Type': 'application/json',
               'x-webhook-secret': webhookSecret || '',
+              // O bot fica com "Verify JWT" LIGADO (só o servidor chama): o webhook se identifica com a chave de serviço.
+              // Sem isso o gateway devolvia 401 e o bot nunca respondia.
+              Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`,
+              apikey: Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
             },
             body: JSON.stringify({
               empresa_id: empresaId,
