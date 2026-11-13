@@ -44,6 +44,7 @@ export default function CardapioEstoquePage() {
 
   const [limiteInput, setLimiteInput] = useState('5');
   const [avisoUltimas, setAvisoUltimas] = useState(true);
+  const [esgotadoAuto, setEsgotadoAuto] = useState(true);
   const [salvando, setSalvando] = useState(false);
 
   const carregar = useCallback(async (silencioso = false) => {
@@ -60,6 +61,7 @@ export default function CardapioEstoquePage() {
       setEmpresaConfig(cfg);
       setLimiteInput(String(cfg.estoque_limite_minimo ?? painel?.limite ?? 5));
       setAvisoUltimas(cfg.estoque_aviso_ultimas_ativo !== false);
+      setEsgotadoAuto(cfg.estoque_esgotado_auto_ativo !== false);
     } catch (e) {
       console.error('Erro ao carregar estoque do cardápio:', e);
       toast({ title: 'Erro ao carregar o estoque', description: e.message, variant: 'destructive' });
@@ -79,7 +81,7 @@ export default function CardapioEstoquePage() {
     const limite = Math.max(1, parseInt(limiteInput, 10) || 5);
     setSalvando(true);
     try {
-      const novo = { ...empresaConfig, estoque_limite_minimo: limite, estoque_aviso_ultimas_ativo: avisoUltimas };
+      const novo = { ...empresaConfig, estoque_limite_minimo: limite, estoque_aviso_ultimas_ativo: avisoUltimas, estoque_esgotado_auto_ativo: esgotadoAuto };
       const { error } = await supabase.from('empresas').update({ cardapio_config: novo }).eq('id', empresaId);
       if (error) throw error;
       setEmpresaConfig(novo);
@@ -183,12 +185,21 @@ export default function CardapioEstoquePage() {
                 Item com estoque até esse valor aparece como "Baixo" aqui, gera alerta para o gestor (se ligado em WhatsApp & Notificações) e mostra "Últimas unidades" no cardápio.
               </p>
             </div>
-            <div className="flex items-center justify-between border rounded-lg p-3">
-              <div>
-                <Label className="text-gray-900">Mostrar "Últimas unidades" no cardápio</Label>
-                <p className="text-xs text-gray-400">O cliente vê o aviso, nunca a quantidade.</p>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between border rounded-lg p-3">
+                <div>
+                  <Label className="text-gray-900">Mostrar "Últimas unidades" no cardápio</Label>
+                  <p className="text-xs text-gray-400">O cliente vê o aviso, nunca a quantidade.</p>
+                </div>
+                <Switch checked={avisoUltimas} onCheckedChange={setAvisoUltimas} />
               </div>
-              <Switch checked={avisoUltimas} onCheckedChange={setAvisoUltimas} />
+              <div className="flex items-center justify-between border rounded-lg p-3">
+                <div>
+                  <Label className="text-gray-900">"Esgotado" automático no cardápio</Label>
+                  <p className="text-xs text-gray-400">Item que zera no estoque principal e na reserva aparece como esgotado (ou some, conforme a opção da loja) e volta sozinho quando repor.</p>
+                </div>
+                <Switch checked={esgotadoAuto} onCheckedChange={setEsgotadoAuto} />
+              </div>
             </div>
           </div>
           <div className="flex justify-end">
@@ -250,7 +261,14 @@ export default function CardapioEstoquePage() {
                           <td className="px-3 py-2 text-center">
                             <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${COR[i.status] || COR.ok}`}>{ROTULO[i.status] || i.status}</span>
                           </td>
-                          <td className="px-3 py-2 text-right font-semibold text-gray-900">{ehCombo || i.estoque == null ? '—' : i.estoque}</td>
+                          <td className="px-3 py-2 text-right font-semibold text-gray-900">
+                            {ehCombo || i.estoque == null ? '—' : i.estoque}
+                            {!ehCombo && i.reserva_nome && i.estoque_principal != null && (
+                              <p className="text-[11px] font-normal text-gray-400" data-testid="detalhe-reserva">
+                                {i.estoque_principal} principal + {i.estoque_reserva ?? 0} {String(i.reserva_nome).replace(/^ESTOQUE\s+/i, '').toLowerCase()}
+                              </p>
+                            )}
+                          </td>
                           <td className={`px-3 py-2 text-right font-semibold ${Number(i.bloqueios_7d) > 0 ? 'text-red-600' : 'text-gray-400'}`}>{Number(i.bloqueios_7d) || 0}</td>
                           <td className="px-3 py-2 text-right text-gray-600 hidden md:table-cell">{i.qtd_max_pedida != null ? i.qtd_max_pedida : '—'}</td>
                           <td className="px-3 py-2 text-right text-gray-500 hidden md:table-cell">{formatarQuando(i.ultimo_bloqueio_em)}</td>
