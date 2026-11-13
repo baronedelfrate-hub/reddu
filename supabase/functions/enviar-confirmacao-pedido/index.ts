@@ -79,7 +79,11 @@ Deno.serve(async (req) => {
       texto += `\nAgendado para: ${dataFormatada}`;
     }
 
-    const numeroLimpo = String(pedido.cliente_telefone).replace(/\D/g, '');
+    // O cardápio guarda só DDD + número (10 ou 11 dígitos): completa o DDI 55,
+    // senão a Evolution responde "exists: false" e a mensagem nunca sai.
+    let numeroLimpo = String(pedido.cliente_telefone).replace(/\D/g, '');
+    if (numeroLimpo.length === 11 && numeroLimpo.startsWith('0')) numeroLimpo = numeroLimpo.slice(1);
+    if (numeroLimpo.length === 10 || numeroLimpo.length === 11) numeroLimpo = '55' + numeroLimpo;
     const cleanBaseUrl = String(config.base_url).replace(/\/+$/, '');
 
     const evoResp = await fetch(`${cleanBaseUrl}/message/sendText/${encodeURIComponent(config.instance_name)}`, {
