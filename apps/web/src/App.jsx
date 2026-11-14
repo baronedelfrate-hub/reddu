@@ -84,6 +84,7 @@ import CardapioCashbackPage from './pages/CardapioCashbackPage';
 import CardapioPagamentoPage from './pages/CardapioPagamentoPage';
 import CardapioWhatsappPage from './pages/CardapioWhatsappPage';
 import CardapioEstoquePage from './pages/CardapioEstoquePage';
+import NotasFiscaisPage from './pages/NotasFiscaisPage';
 import CardapioItensPage from './pages/CardapioItensPage';
 import CardapioPublicoPage from './pages/CardapioPublicoPage';
 import RedefinirSenhaPage from './pages/RedefinirSenhaPage';
@@ -214,6 +215,7 @@ function App() {
             <Route path="/dashboard/perfis" element={<ProtectedRoute><PerfisPage /></ProtectedRoute>} />
 
             <Route path="/configuracoes-fiscais" element={<ProtectedRoute><ConfiguracoesFiscaisPage /></ProtectedRoute>} />
+            <Route path="/dashboard/notas-fiscais" element={<ProtectedRoute><NotasFiscaisPage /></ProtectedRoute>} />
 
             {/* Rotas do módulo WhatsApp (Evolution API) */}
             <Route path="/dashboard/whatsapp/configuracao" element={<ProtectedRoute><WhatsAppConfiguracaoPage /></ProtectedRoute>} />

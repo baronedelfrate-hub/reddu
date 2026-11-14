@@ -19,7 +19,7 @@ import {
   BarChart3, Truck, Lock, ChevronDown, ChevronRight, ClipboardList, Printer, Settings2, Store,
   Zap, ChevronLeft, ShieldAlert, Smartphone, Activity, Building2, Clock, ScanBarcode, CheckSquare,
   Receipt, Calendar, ClipboardCheck, TrendingUp, Sparkles, MessageCircle, Send, AlertCircle, Search,
-  UtensilsCrossed, ShoppingBag, Tag, UserCog, Landmark, Scale, Bike, CreditCard, Wallet, CalendarClock, Coins
+  UtensilsCrossed, ShoppingBag, Tag, UserCog, Landmark, Scale, Bike, CreditCard, Wallet, CalendarClock, Coins, FileCheck
 } from 'lucide-react';
 
 // ─── Símbolo Reddu (três pontos conectados) ─────────────────────────────────
@@ -471,12 +471,18 @@ export default function DashboardLayout({ children }) {
       ]
     },
     {
+      title: 'Fiscal', icon: Receipt, color: 'bg-sky-500',
+      items: [
+        { name: 'Notas Fiscais', href: '/dashboard/notas-fiscais', icon: FileCheck },
+        { name: 'Config. Fiscais', href: '/configuracoes-fiscais', icon: Settings2 },
+      ]
+    },
+    {
       title: 'Cadastros', icon: Settings, color: 'bg-teal-500',
       items: [
         { name: 'Produtos', href: '/dashboard/produtos', icon: Package },
         { name: 'Locais', href: '/dashboard/locais', icon: MapPin },
         { name: 'Usuários', href: '/dashboard/usuarios', icon: Users },
-        { name: 'Config. Fiscais', href: '/configuracoes-fiscais', icon: Receipt },
       ]
     },
     {
