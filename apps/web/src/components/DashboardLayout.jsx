@@ -471,31 +471,16 @@ export default function DashboardLayout({ children }) {
       ]
     },
     {
+      title: 'Eventos', icon: Calendar, color: 'bg-amber-500',
+      items: [
+        { name: 'Agenda de Eventos', href: '/dashboard/eventos', icon: Calendar },
+      ]
+    },
+    {
       title: 'Fiscal', icon: Receipt, color: 'bg-sky-500',
       items: [
         { name: 'Notas Fiscais', href: '/dashboard/notas-fiscais', icon: FileCheck },
         { name: 'Config. Fiscais', href: '/configuracoes-fiscais', icon: Settings2 },
-      ]
-    },
-    {
-      title: 'Cadastros', icon: Settings, color: 'bg-teal-500',
-      items: [
-        { name: 'Produtos', href: '/dashboard/produtos', icon: Package },
-        { name: 'Locais', href: '/dashboard/locais', icon: MapPin },
-        { name: 'Usuários', href: '/dashboard/usuarios', icon: Users },
-      ]
-    },
-    {
-      title: 'Controle', icon: Lock, color: 'bg-slate-600',
-      items: [
-        { name: 'Movimentações', href: '/dashboard/movimentacoes', icon: ArrowRightLeft },
-        ...(isAdmin() ? [{ name: 'Auditoria', href: '/dashboard/logs-auditoria', icon: History }] : [])
-      ]
-    },
-    {
-      title: 'Eventos', icon: Calendar, color: 'bg-amber-500',
-      items: [
-        { name: 'Agenda de Eventos', href: '/dashboard/eventos', icon: Calendar },
       ]
     },
     {
@@ -508,14 +493,32 @@ export default function DashboardLayout({ children }) {
         { name: 'Configuração', href: '/dashboard/whatsapp/configuracao', icon: MessageCircle },
       ]
     },
-    // ─── ALTERADO: adicionado "Perfis de Acesso" dentro de Administração ─────
-    ...(isAdmin() ? [{
+    // Administração reúne Cadastros e Controle (subgrupos, visíveis conforme o perfil do usuário)
+    // e, só para admin, Empresas, Perfis de Acesso e a Auditoria (logs).
+    {
       title: 'Administração', icon: ShieldAlert, color: 'bg-gray-500',
       items: [
-        { name: 'Empresas', href: '/dashboard/empresas', icon: Building2 },
-        { name: 'Perfis de Acesso', href: '/dashboard/perfis', icon: UserCog },
+        ...(isAdmin() ? [
+          { name: 'Empresas', href: '/dashboard/empresas', icon: Building2 },
+          { name: 'Perfis de Acesso', href: '/dashboard/perfis', icon: UserCog },
+        ] : []),
+        {
+          isSubgroup: true, title: 'Cadastros',
+          items: [
+            { name: 'Produtos', href: '/dashboard/produtos', icon: Package },
+            { name: 'Locais', href: '/dashboard/locais', icon: MapPin },
+            { name: 'Usuários', href: '/dashboard/usuarios', icon: Users },
+          ]
+        },
+        {
+          isSubgroup: true, title: 'Controle',
+          items: [
+            { name: 'Movimentações', href: '/dashboard/movimentacoes', icon: ArrowRightLeft },
+            ...(isAdmin() ? [{ name: 'Auditoria', href: '/dashboard/logs-auditoria', icon: History }] : [])
+          ]
+        },
       ]
-    }] : []),
+    },
     // ─── NOVO: seção só visível pra super-admin da plataforma ────────────────
     ...(isSuperAdmin ? [{
       title: 'Gestor da Plataforma', icon: Landmark, color: 'bg-red-700',
@@ -614,6 +617,7 @@ export default function DashboardLayout({ children }) {
     'bg-green-500': { light: 'bg-green-50', text: 'text-green-600', border: 'border-green-500' },
     'bg-gray-500': { light: 'bg-gray-50', text: 'text-gray-600', border: 'border-gray-500' },
     'bg-red-700': { light: 'bg-red-50', text: 'text-red-700', border: 'border-red-700' },
+    'bg-sky-500': { light: 'bg-sky-50', text: 'text-sky-600', border: 'border-sky-500' },
   };
   const defaultVariant = { light: 'bg-red-50', text: 'text-[var(--color-primary)]', border: 'border-[var(--color-primary)]' };
 
