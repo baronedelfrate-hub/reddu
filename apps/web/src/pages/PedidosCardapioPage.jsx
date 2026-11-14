@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import RegistrarPagamentoModal from '@/components/pedidos-cardapio/RegistrarPagamentoModal';
 import { useNFCeEmission } from '@/hooks/useNFCeEmission';
+import { textoOrigemItem } from '@/utils/cupomPedidoCardapio';
 
 const COLUNAS = [
   { status: 'PENDENTE', label: 'Pendente', color: 'border-amber-300 bg-amber-50', dot: 'bg-amber-400' },
@@ -117,7 +118,7 @@ export default function PedidosCardapioPage() {
       // Pedidos Balcão). Nenhum total/status do pedido em si depende disso.
       const { data, error } = await supabase
         .from('pedidos_cardapio')
-        .select('*, pedidos_cardapio_itens(*), vendas(financeiro_baixado, forma_pagamento, cpf_cliente, status_fiscal, nfe_url_pdf, nfe_erro_mensagem)')
+        .select('*, pedidos_cardapio_itens(*, locais(nome), lotes(numero_lote, data_validade)), vendas(financeiro_baixado, forma_pagamento, cpf_cliente, status_fiscal, nfe_url_pdf, nfe_erro_mensagem)')
         .eq('empresa_id', empresaId)
         .eq('arquivado', false)
         .order('created_at', { ascending: true });
@@ -226,9 +227,13 @@ export default function PedidosCardapioPage() {
       const subtotalCupom = Math.max(0, Number(pedido.total || 0) - taxaCupom + descontoCupom);
       const itensHtml = linhas.map((linha) => {
         if (linha.tipo === 'simples') {
-          return `<div class="linha"><span>${linha.item.quantidade}x ${linha.item.nome_item}</span><span>${formatPreco(linha.item.subtotal)}</span></div>`;
+          const o = textoOrigemItem(linha.item);
+          return `<div class="linha"><span>${linha.item.quantidade}x ${linha.item.nome_item}</span><span>${formatPreco(linha.item.subtotal)}</span></div>${o ? `<div class="origem">${o}</div>` : ''}`;
         }
-        const saboresHtml = linha.sabores.map((s) => `<div class="sabor">${s.quantidade}x ${s.nome_item} — ${formatPreco(s.subtotal)}</div>`).join('');
+        const saboresHtml = linha.sabores.map((s) => {
+          const o = textoOrigemItem(s);
+          return `<div class="sabor">${s.quantidade}x ${s.nome_item} — ${formatPreco(s.subtotal)}</div>${o ? `<div class="origem" style="padding-left:3mm;">${o}</div>` : ''}`;
+        }).join('');
         const totalGrupo = linha.header.subtotal + linha.sabores.reduce((s, x) => s + x.subtotal, 0);
         return `<div class="linha bold"><span>${linha.header.quantidade}x ${linha.header.nome_item}</span><span>${formatPreco(totalGrupo)}</span></div>${saboresHtml}`;
       }).join('');
@@ -249,6 +254,7 @@ export default function PedidosCardapioPage() {
               .divisor { border-top: 1px dashed #000; margin: 2mm 0; }
               .linha { display: flex; justify-content: space-between; margin-top: 1mm; }
               .sabor { padding-left: 3mm; font-size: 11px; }
+              .origem { font-size: 10px; color: #333; }
               .info { margin-top: 1mm; }
               .total { display: flex; justify-content: space-between; font-size: 14px; font-weight: bold; margin-top: 2mm; }
             </style>
@@ -431,7 +437,7 @@ export default function PedidosCardapioPage() {
     try {
       const { data, error } = await supabase
         .from('pedidos_cardapio')
-        .select('*, pedidos_cardapio_itens(*), vendas(financeiro_baixado, forma_pagamento, cpf_cliente, status_fiscal, nfe_url_pdf, nfe_erro_mensagem)')
+        .select('*, pedidos_cardapio_itens(*, locais(nome), lotes(numero_lote, data_validade)), vendas(financeiro_baixado, forma_pagamento, cpf_cliente, status_fiscal, nfe_url_pdf, nfe_erro_mensagem)')
         .eq('empresa_id', empresaId)
         .eq('arquivado', true)
         .order('created_at', { ascending: false })
@@ -709,9 +715,14 @@ export default function PedidosCardapioPage() {
                           <div className="mt-2 space-y-1.5 border-t pt-2">
                             {agruparItens(pedido).map((linha) => (
                               linha.tipo === 'simples' ? (
-                                <div key={linha.item.id} className="flex justify-between text-xs text-gray-600">
-                                  <span>{linha.item.quantidade}x {linha.item.nome_item}</span>
-                                  <span>{formatPreco(linha.item.subtotal)}</span>
+                                <div key={linha.item.id} className="text-xs text-gray-600">
+                                  <div className="flex justify-between">
+                                    <span>{linha.item.quantidade}x {linha.item.nome_item}</span>
+                                    <span>{formatPreco(linha.item.subtotal)}</span>
+                                  </div>
+                                  {textoOrigemItem(linha.item) && (
+                                    <p data-testid="origem-item" className="text-[11px] text-blue-600 pl-2">📍 {textoOrigemItem(linha.item)}</p>
+                                  )}
                                 </div>
                               ) : (
                                 <div key={linha.header.id} className="text-xs text-gray-600">
@@ -721,7 +732,10 @@ export default function PedidosCardapioPage() {
                                   </div>
                                   <div className="pl-2 text-gray-400 space-y-0.5 mt-0.5">
                                     {linha.sabores.map((s) => (
-                                      <p key={s.id}>{s.quantidade}x {s.nome_item}{s.subtotal > 0 ? ` — ${formatPreco(s.subtotal)}` : ''}</p>
+                                      <div key={s.id}>
+                                        <p>{s.quantidade}x {s.nome_item}{s.subtotal > 0 ? ` — ${formatPreco(s.subtotal)}` : ''}</p>
+                                        {textoOrigemItem(s) && <p data-testid="origem-item" className="text-[11px] text-blue-600">📍 {textoOrigemItem(s)}</p>}
+                                      </div>
                                     ))}
                                   </div>
                                 </div>

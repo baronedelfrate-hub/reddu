@@ -120,7 +120,7 @@ export default function AgendadosAlertas() {
       // 2) Aceitos aguardando produção
       const { data } = await supabase
         .from('pedidos_cardapio')
-        .select('*, pedidos_cardapio_itens(*), vendas(forma_pagamento)')
+        .select('*, pedidos_cardapio_itens(*, locais(nome), lotes(numero_lote, data_validade)), vendas(forma_pagamento)')
         .eq('empresa_id', empresaId)
         .eq('status', 'PENDENTE')
         .eq('arquivado', false)

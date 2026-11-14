@@ -15,6 +15,25 @@ export const rotuloFormaPagamento = (f) => {
   return mapa[chave] || (f ? String(f) : '');
 };
 
+// Origem do item no estoque: "ESTOQUE CENTRAL · Lote 123 (val. 10/12/26)".
+// Vazio quando o item ainda não baixou estoque (ex.: pedido agendado).
+export const textoOrigemItem = (item) => {
+  const local = item?.locais?.nome;
+  const lote = item?.lotes?.numero_lote;
+  const val = item?.lotes?.data_validade;
+  const partes = [];
+  if (local) partes.push(local);
+  if (lote) {
+    let t = `Lote ${lote}`;
+    if (val) {
+      const [a, m, d] = String(val).slice(0, 10).split('-');
+      if (a && m && d) t += ` (val. ${d}/${m}/${a.slice(2)})`;
+    }
+    partes.push(t);
+  }
+  return partes.join(' · ');
+};
+
 // Agrupa linhas de combo (cabeçalho + sabores) e mantém itens simples.
 export const agruparItensPedido = (pedido) => {
   const grupos = {};
@@ -71,9 +90,13 @@ export function imprimirCupomPedido(pedido, empresaNome) {
     const subtotalCupom = Math.max(0, Number(pedido.total || 0) - taxaCupom + descontoCupom);
     const itensHtml = linhas.map((linha) => {
       if (linha.tipo === 'simples') {
-        return `<div class="linha"><span>${linha.item.quantidade}x ${esc(linha.item.nome_item)}</span><span>${formatPreco(linha.item.subtotal)}</span></div>`;
+        const o = textoOrigemItem(linha.item);
+        return `<div class="linha"><span>${linha.item.quantidade}x ${esc(linha.item.nome_item)}</span><span>${formatPreco(linha.item.subtotal)}</span></div>${o ? `<div class="origem">${esc(o)}</div>` : ''}`;
       }
-      const saboresHtml = linha.sabores.map((s) => `<div class="sabor">${s.quantidade}x ${esc(s.nome_item)} — ${formatPreco(s.subtotal)}</div>`).join('');
+      const saboresHtml = linha.sabores.map((s) => {
+        const o = textoOrigemItem(s);
+        return `<div class="sabor">${s.quantidade}x ${esc(s.nome_item)} — ${formatPreco(s.subtotal)}</div>${o ? `<div class="origem" style="padding-left:3mm;">${esc(o)}</div>` : ''}`;
+      }).join('');
       const totalGrupo = Number(linha.header.subtotal || 0) + linha.sabores.reduce((s, x) => s + Number(x.subtotal || 0), 0);
       return `<div class="linha bold"><span>${linha.header.quantidade}x ${esc(linha.header.nome_item)}</span><span>${formatPreco(totalGrupo)}</span></div>${saboresHtml}`;
     }).join('');
@@ -93,7 +116,8 @@ export function imprimirCupomPedido(pedido, empresaNome) {
             .titulo { font-size: 16px; font-weight: bold; }
             .divisor { border-top: 1px dashed #000; margin: 2mm 0; }
             .linha { display: flex; justify-content: space-between; margin-top: 1mm; }
-            .sabor { padding-left: 3mm; font-size: 11px; }
+            .origem { font-size: 10px; color: #333; }
+              .sabor { padding-left: 3mm; font-size: 11px; }
             .info { margin-top: 1mm; }
             .total { display: flex; justify-content: space-between; font-size: 14px; font-weight: bold; margin-top: 2mm; }
           </style>
