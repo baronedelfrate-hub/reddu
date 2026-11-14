@@ -66,11 +66,23 @@ export default function WhatsappAtalho({ empresaId }) {
       title={titulo}
       aria-label={titulo}
       data-testid="atalho-whatsapp"
-      className={`relative p-2.5 rounded-full transition-colors ${temNovas ? 'text-green-600 bg-green-50 hover:bg-green-100' : 'text-gray-500 hover:bg-gray-100'}`}
+      className={`relative flex items-center gap-2 rounded-full border-2 px-3.5 py-1.5 text-sm font-bold transition-colors
+        ${temNovas
+          ? 'border-green-600 bg-green-600 text-white shadow-md shadow-green-600/30 hover:bg-green-700'
+          : 'border-green-400 bg-green-50 text-green-700 hover:bg-green-100'}`}
     >
-      <MessageCircle className="h-7 w-7" />
+      <span className="relative flex">
+        <MessageCircle className="h-6 w-6" />
+        {temNovas && (
+          <span className="absolute -top-1 -right-1 flex h-3 w-3" aria-hidden="true">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-80" />
+            <span className="relative inline-flex h-3 w-3 rounded-full bg-white" />
+          </span>
+        )}
+      </span>
+      <span className="hidden sm:inline">Conversas</span>
       {temNovas && (
-        <span data-testid="atalho-whatsapp-contador" className="absolute -top-1 -right-1 bg-green-600 text-white text-xs font-bold min-w-[22px] h-[22px] px-1 rounded-full flex items-center justify-center border-2 border-white">
+        <span data-testid="atalho-whatsapp-contador" className="flex h-[22px] min-w-[22px] items-center justify-center rounded-full bg-white px-1.5 text-xs font-extrabold text-green-700">
           {conversas > 9 ? '9+' : conversas}
         </span>
       )}
