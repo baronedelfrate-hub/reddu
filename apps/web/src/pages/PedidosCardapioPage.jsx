@@ -386,10 +386,22 @@ export default function PedidosCardapioPage() {
       }
       const { error } = await supabase.rpc('rpc_atualizar_status_pedido_cardapio', { p_pedido_id: pedido.id, p_novo_status: novoStatus });
       if (error) throw error;
-      setPedidos((prev) => prev.map((p) => (p.id === pedido.id ? { ...p, status: novoStatus } : p)));
+      let pedidoAtual = { ...pedido, status: novoStatus };
+      if (!pedido.estoque_baixado && novoStatus !== 'PENDENTE' && novoStatus !== 'CANCELADO') {
+        // Pedido agendado: a baixa de estoque aconteceu agora (local e lote definidos).
+        // Recarrega o pedido para a tela e o cupom já mostrarem de onde sai cada item.
+        const { data: fresco } = await supabase
+          .from('pedidos_cardapio')
+          .select('*, pedidos_cardapio_itens(*, locais(nome), lotes(numero_lote, data_validade)), vendas(financeiro_baixado, forma_pagamento, cpf_cliente, status_fiscal, nfe_url_pdf, nfe_erro_mensagem)')
+          .eq('id', pedido.id)
+          .maybeSingle();
+        if (fresco) pedidoAtual = fresco;
+        toast({ title: `Pedido #${pedido.numero_pedido} confirmado`, description: 'Estoque baixado: local e lote definidos.' });
+      }
+      setPedidos((prev) => prev.map((p) => (p.id === pedido.id ? pedidoAtual : p)));
       notificarClienteWhatsApp(pedido, novoStatus);
       if (novoStatus === 'CONFIRMADO' && impressaoAutomatica) {
-        imprimirPedido(pedido);
+        imprimirPedido(pedidoAtual);
       }
     } catch (error) {
       toast({ title: 'Erro ao atualizar status', description: error.message?.replace(/^.*ERROR:\s*/i, ''), variant: 'destructive' });
