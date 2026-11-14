@@ -478,6 +478,16 @@ export default function DashboardLayout({ children }) {
       ]
     },
     {
+      title: 'WhatsApp', icon: MessageCircle, color: 'bg-green-500',
+      items: [
+        { name: 'Conversas', href: '/dashboard/whatsapp/conversas', icon: MessageCircle },
+        { name: 'Disparo em Massa', href: '/dashboard/whatsapp/disparos', icon: Send },
+        { name: 'Relatório', href: '/dashboard/whatsapp/relatorio', icon: BarChart3 },
+        { name: 'Clientes', href: '/dashboard/whatsapp/clientes', icon: Users },
+        { name: 'Configuração', href: '/dashboard/whatsapp/configuracao', icon: MessageCircle },
+      ]
+    },
+    {
       title: 'Fiscal', icon: Receipt, color: 'bg-sky-500',
       items: [
         { name: 'Notas Fiscais', href: '/dashboard/notas-fiscais', icon: FileCheck },
@@ -490,16 +500,6 @@ export default function DashboardLayout({ children }) {
         { name: 'Produtos', href: '/dashboard/produtos', icon: Package },
         { name: 'Locais', href: '/dashboard/locais', icon: MapPin },
         { name: 'Usuários', href: '/dashboard/usuarios', icon: Users },
-      ]
-    },
-    {
-      title: 'WhatsApp', icon: MessageCircle, color: 'bg-green-500',
-      items: [
-        { name: 'Conversas', href: '/dashboard/whatsapp/conversas', icon: MessageCircle },
-        { name: 'Disparo em Massa', href: '/dashboard/whatsapp/disparos', icon: Send },
-        { name: 'Relatório', href: '/dashboard/whatsapp/relatorio', icon: BarChart3 },
-        { name: 'Clientes', href: '/dashboard/whatsapp/clientes', icon: Users },
-        { name: 'Configuração', href: '/dashboard/whatsapp/configuracao', icon: MessageCircle },
       ]
     },
     // Administração reúne o subgrupo Controle (visível conforme o perfil do usuário) e, só para
