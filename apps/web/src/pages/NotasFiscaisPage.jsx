@@ -7,7 +7,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, FileCheck, Search, Download, Copy, ExternalLink, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Loader2, FileCheck, Search, Download, Copy, ExternalLink, AlertTriangle, RefreshCw, FileCode, Archive, Wrench } from 'lucide-react';
 
 // Consulta das notas fiscais emitidas (e das que deram erro), reunindo todas as origens:
 // vendas (PDV, balcão, cardápio...), Faturamento de Reabastecimento e Pedido Consignado.
@@ -36,6 +36,30 @@ const fmtDoc = (d) => {
   if (n.length === 14) return n.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
   return n || '—';
 };
+// A Focus guarda a chave como "NFe" + 44 dígitos; a chave de acesso de verdade são os 44 dígitos.
+const chaveLimpa = (c) => String(c || '').replace(/\D/g, '').slice(0, 44);
+
+const baixarArquivo = (nome, partes, tipo) => {
+  const url = URL.createObjectURL(new Blob(partes, { type: tipo }));
+  const a = document.createElement('a');
+  a.href = url; a.download = nome;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+};
+const base64ParaBytes = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+
+// Chama a função do servidor (que usa o token da Focus). Devolve os dados ou lança com a mensagem certa.
+const chamarArquivos = async (body) => {
+  const { data, error } = await supabase.functions.invoke('notas-fiscais-arquivos', { body });
+  if (error) {
+    let msg = error.message;
+    try { const j = await error.context?.json?.(); if (j?.error) msg = j.error; } catch { /* mantém a mensagem */ }
+    throw new Error(msg);
+  }
+  if (data?.ok === false) throw new Error(data.error || 'Erro ao buscar os arquivos.');
+  return data;
+};
+
 const normStatus = (s) => (s === 'emitido' || s === 'success' ? 'emitido' : 'erro');
 
 // Junta as linhas de mercado que compartilham a mesma nota (nota combinada) numa linha só.
@@ -66,6 +90,9 @@ export default function NotasFiscaisPage() {
   const [origem, setOrigem] = useState('todas');
   const [situacao, setSituacao] = useState('emitido'); // emitido | erro | todas
   const [busca, setBusca] = useState('');
+  const [baixandoId, setBaixandoId] = useState(null);
+  const [baixandoZip, setBaixandoZip] = useState(false);
+  const [completando, setCompletando] = useState(false);
 
   const carregar = useCallback(async () => {
     if (!empresaId) { setLoading(false); return; }
@@ -97,14 +124,14 @@ export default function NotasFiscaisPage() {
       if (consRes.error) throw consRes.error;
 
       const vendas = (vendasRes.data || []).map((v) => ({
-        id: `v-${v.id}`, data: v.data_venda || v.created_at, origem: v.canal_venda || 'OUTROS',
+        id: `v-${v.id}`, fonte: 'vendas', fonteId: v.id, data: v.data_venda || v.created_at, origem: v.canal_venda || 'OUTROS',
         descricao: v.cliente_referencia || 'Consumidor', valor: v.total_final, doc: v.cpf_cliente,
-        chave: v.nfe_chave, pdf: v.nfe_url_pdf, status: normStatus(v.status_fiscal), erro: v.nfe_erro_mensagem,
+        chave: chaveLimpa(v.nfe_chave) || null, pdf: v.nfe_url_pdf, status: normStatus(v.status_fiscal), erro: v.nfe_erro_mensagem,
       }));
       const mercado = (rows, origemNome, chavePedido) => agruparPorChave((rows || []).map((m) => ({
-        id: `${origemNome}-${m.id}`, data: m[chavePedido]?.gerado_em, origem: origemNome,
+        id: `${origemNome}-${m.id}`, fonte: origemNome.toLowerCase(), fonteId: m.id, data: m[chavePedido]?.gerado_em, origem: origemNome,
         descricao: m.locais?.nome || 'Mercado', valor: m.valor_total, doc: m.cpf_cnpj_utilizado,
-        chave: m.nfe_chave, pdf: m.nfe_url_pdf, status: normStatus(m.status_fiscal), erro: m.nfe_erro_mensagem,
+        chave: chaveLimpa(m.nfe_chave) || null, pdf: m.nfe_url_pdf, status: normStatus(m.status_fiscal), erro: m.nfe_erro_mensagem,
       })));
 
       setNotas([
@@ -157,6 +184,63 @@ export default function NotasFiscaisPage() {
     }
   };
 
+  const baixarXml = async (n) => {
+    setBaixandoId(n.id);
+    try {
+      const r = await chamarArquivos({ action: 'xml', fonte: n.fonte, id: n.fonteId });
+      baixarArquivo(r.nome, [r.xml], 'application/xml;charset=utf-8');
+    } catch (e) {
+      toast({ title: 'Não foi possível baixar o XML', description: e.message, variant: 'destructive' });
+    } finally {
+      setBaixandoId(null);
+    }
+  };
+
+  const baixarZip = async () => {
+    setBaixandoZip(true);
+    try {
+      const r = await chamarArquivos({ action: 'zip', de, ate, origem: origem !== 'todas' ? origem : null });
+      baixarArquivo(r.nome, [base64ParaBytes(r.base64)], 'application/zip');
+      const falhas = r.falhas?.length || 0;
+      toast({
+        title: `${r.incluidas} XML(s) baixado(s)`,
+        description: falhas > 0 ? `${falhas} nota(s) não puderam ser obtidas na Focus (ex.: ${r.falhas[0].descricao}: ${r.falhas[0].motivo}).` : undefined,
+        variant: falhas > 0 ? 'destructive' : undefined,
+      });
+    } catch (e) {
+      toast({ title: 'Não foi possível gerar o ZIP', description: e.message, variant: 'destructive' });
+    } finally {
+      setBaixandoZip(false);
+    }
+  };
+
+  // Notas antigas (vendas) emitidas sem chave nem link guardados: busca na Focus e completa.
+  const semChave = useMemo(() => notas.filter((n) => n.fonte === 'vendas' && n.status === 'emitido' && !n.chave).length, [notas]);
+  const completarDados = async () => {
+    setCompletando(true);
+    const ignorar = [];
+    let total = 0;
+    try {
+      for (let i = 0; i < 30; i += 1) {
+        const r = await chamarArquivos({ action: 'completar', ignorar });
+        total += r.atualizadas || 0;
+        (r.falhas || []).forEach((f) => ignorar.push(f.id));
+        if (!r.restantes || (r.atualizadas || 0) === 0) break;
+      }
+      toast({
+        title: `${total} nota(s) completada(s)`,
+        description: ignorar.length > 0 ? `${ignorar.length} nota(s) não foram encontradas na Focus e continuam sem chave.` : undefined,
+        variant: ignorar.length > 0 && total === 0 ? 'destructive' : undefined,
+      });
+      await carregar();
+    } catch (e) {
+      toast({ title: 'Não foi possível completar os dados', description: e.message, variant: 'destructive' });
+      if (total > 0) await carregar();
+    } finally {
+      setCompletando(false);
+    }
+  };
+
   const exportarCsv = () => {
     const aspas = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const linhas = [
@@ -184,7 +268,7 @@ export default function NotasFiscaisPage() {
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
             <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2"><FileCheck className="h-6 w-6" /> Notas Fiscais</h1>
-            <p className="text-sm text-gray-500 mt-1">Todas as notas emitidas pelo sistema: PDV, cardápio, reabastecimento e consignado. Nota combinada aparece em uma linha só.</p>
+            <p className="text-sm text-gray-500 mt-1">Todas as notas emitidas pelo sistema: PDV, cardápio, reabastecimento e consignado. Nota combinada aparece em uma linha só. Baixe o XML de uma nota ou de todas do período.</p>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={carregar} disabled={loading} className="gap-1.5">
@@ -192,6 +276,9 @@ export default function NotasFiscaisPage() {
             </Button>
             <Button variant="outline" size="sm" onClick={exportarCsv} disabled={filtradas.length === 0} className="gap-1.5">
               <Download className="h-4 w-4" /> Exportar planilha
+            </Button>
+            <Button size="sm" onClick={baixarZip} disabled={baixandoZip || loading || situacao === 'erro'} className="gap-1.5" title="Baixa os XMLs das notas emitidas do período (e da origem) escolhidos">
+              {baixandoZip ? <Loader2 className="h-4 w-4 animate-spin" /> : <Archive className="h-4 w-4" />} Baixar XMLs (ZIP)
             </Button>
           </div>
         </div>
@@ -244,6 +331,15 @@ export default function NotasFiscaisPage() {
           </div>
         </div>
 
+        {semChave > 0 && (
+          <div className="flex items-center justify-between gap-3 flex-wrap text-sm bg-sky-50 border border-sky-200 rounded-lg px-3 py-2" data-testid="aviso-sem-chave">
+            <span className="text-sky-900">{semChave} nota(s) emitida(s) neste período estão sem chave de acesso e link guardados (notas antigas). Dá para buscar esses dados na Focus.</span>
+            <Button size="sm" variant="outline" className="gap-1.5" onClick={completarDados} disabled={completando}>
+              {completando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wrench className="h-4 w-4" />} Completar dados
+            </Button>
+          </div>
+        )}
+
         {truncado && (
           <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
             Mostrando só as {LIMITE_POR_ORIGEM} notas mais recentes de pelo menos uma origem. Reduza o período para ver todas.
@@ -289,9 +385,12 @@ export default function NotasFiscaisPage() {
                         <div className="inline-flex gap-1">
                           {n.pdf && (
                             <Button asChild size="sm" variant="outline" className="h-8 gap-1">
-                              <a href={n.pdf} target="_blank" rel="noopener noreferrer"><ExternalLink className="h-3.5 w-3.5" /> PDF</a>
+                              <a href={n.pdf} target="_blank" rel="noopener noreferrer"><ExternalLink className="h-3.5 w-3.5" /> Ver nota</a>
                             </Button>
                           )}
+                          <Button size="sm" variant="outline" className="h-8 gap-1" onClick={() => baixarXml(n)} disabled={baixandoId === n.id} aria-label="Baixar XML">
+                            {baixandoId === n.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileCode className="h-3.5 w-3.5" />} XML
+                          </Button>
                           {n.chave && (
                             <Button size="sm" variant="outline" className="h-8 gap-1" onClick={() => copiarChave(n.chave)} aria-label="Copiar chave de acesso">
                               <Copy className="h-3.5 w-3.5" /> Chave
