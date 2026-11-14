@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { motion, AnimatePresence } from 'framer-motion';
 import AlertsBell from '@/components/AlertsBell';
 import StatusRapidoBar from '@/components/StatusRapidoBar';
+import WhatsappAtalho from '@/components/WhatsappAtalho';
 import AgendadosAlertas from '@/components/AgendadosAlertas';
 import AtendenteAlerta from '@/components/AtendenteAlerta';
 import MensalidadeAlerta from '@/components/MensalidadeAlerta';
@@ -484,6 +485,14 @@ export default function DashboardLayout({ children }) {
       ]
     },
     {
+      title: 'Cadastros', icon: Settings, color: 'bg-teal-500',
+      items: [
+        { name: 'Produtos', href: '/dashboard/produtos', icon: Package },
+        { name: 'Locais', href: '/dashboard/locais', icon: MapPin },
+        { name: 'Usuários', href: '/dashboard/usuarios', icon: Users },
+      ]
+    },
+    {
       title: 'WhatsApp', icon: MessageCircle, color: 'bg-green-500',
       items: [
         { name: 'Conversas', href: '/dashboard/whatsapp/conversas', icon: MessageCircle },
@@ -493,8 +502,8 @@ export default function DashboardLayout({ children }) {
         { name: 'Configuração', href: '/dashboard/whatsapp/configuracao', icon: MessageCircle },
       ]
     },
-    // Administração reúne Cadastros e Controle (subgrupos, visíveis conforme o perfil do usuário)
-    // e, só para admin, Empresas, Perfis de Acesso e a Auditoria (logs).
+    // Administração reúne o subgrupo Controle (visível conforme o perfil do usuário) e, só para
+    // admin, Empresas, Perfis de Acesso e a Auditoria (logs). Cadastros voltou a ser grupo principal.
     {
       title: 'Administração', icon: ShieldAlert, color: 'bg-gray-500',
       items: [
@@ -502,14 +511,6 @@ export default function DashboardLayout({ children }) {
           { name: 'Empresas', href: '/dashboard/empresas', icon: Building2 },
           { name: 'Perfis de Acesso', href: '/dashboard/perfis', icon: UserCog },
         ] : []),
-        {
-          isSubgroup: true, title: 'Cadastros',
-          items: [
-            { name: 'Produtos', href: '/dashboard/produtos', icon: Package },
-            { name: 'Locais', href: '/dashboard/locais', icon: MapPin },
-            { name: 'Usuários', href: '/dashboard/usuarios', icon: Users },
-          ]
-        },
         {
           isSubgroup: true, title: 'Controle',
           items: [
@@ -879,6 +880,7 @@ export default function DashboardLayout({ children }) {
             </div>
             <div className="flex items-center gap-2">
               <StatusRapidoBar />
+              {itemLiberado('/dashboard/whatsapp/conversas') && <WhatsappAtalho empresaId={empresaId} />}
               <AlertsBell empresaId={empresaId} />
             </div>
           </header>
@@ -888,6 +890,7 @@ export default function DashboardLayout({ children }) {
               (o menu lateral já cobre a navegação principal). */}
           <header className="hidden lg:flex items-center justify-end gap-3 bg-white border-b border-gray-200 px-6 py-2 shrink-0 min-h-[52px] w-full">
             <StatusRapidoBar />
+            {itemLiberado('/dashboard/whatsapp/conversas') && <WhatsappAtalho empresaId={empresaId} />}
             <AlertsBell empresaId={empresaId} />
           </header>
 
