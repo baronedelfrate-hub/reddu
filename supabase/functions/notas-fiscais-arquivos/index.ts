@@ -161,7 +161,10 @@ async function tratar(req: Request) {
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
   const userClient = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: authHeader } } });
-  const { data: userData, error: userError } = await userClient.auth.getUser();
+  // O token vai explícito: getUser() sem argumento procura uma sessão guardada (que não existe no
+  // servidor) e devolvia "Auth session missing" mesmo com o Authorization certo.
+  const jwt = authHeader.replace(/^Bearer\s+/i, '');
+  const { data: userData, error: userError } = await userClient.auth.getUser(jwt);
   if (userError || !userData?.user) throw new ErroHttp(401, 'Sessão inválida. Entre novamente.');
 
   const { data: usuarioRow } = await userClient.from('usuarios').select('empresa_id').eq('id', userData.user.id).maybeSingle();
