@@ -13,6 +13,8 @@
 //   xml       { fonte: 'vendas'|'reabastecimento'|'consignado', id }          -> { nome, xml }
 //   zip       { de, ate, origem? }  (datas YYYY-MM-DD; origem opcional)       -> { nome, base64, incluidas, falhas }
 //   completar { limite?, ignorar? }  notas emitidas sem chave/link: busca na Focus e grava -> { atualizadas, restantes, falhas }
+//   enviar_escritorio { mes: 'YYYY-MM', forcar? }  monta o ZIP dos XMLs do mês e envia por e-mail ao
+//             escritório contábil cadastrado (configuracoes_fiscais.email_escritorio_contabil) -> { enviadas, falhas, email }
 //
 // Deploy: precisa de "Verify JWT" LIGADO (padrão).
 
@@ -154,6 +156,27 @@ function paraBase64(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
+// Baixa os XMLs das notas e monta o ZIP.
+async function montarZipXml(notas: NotaRef[], urlNota: (ref: string) => string, focus: Focus) {
+  const arquivos: Record<string, Uint8Array> = {};
+  const falhas: { descricao: string; motivo: string }[] = [];
+  await comConcorrencia(notas, CONCORRENCIA, async (n) => {
+    try {
+      const { chave, xml } = await xmlDaNota(urlNota, focus, n.ref);
+      let nome = `${chave || chaveLimpa(n.chave) || n.ref}.xml`;
+      if (arquivos[nome]) nome = `${n.ref}-${nome}`;
+      arquivos[nome] = strToU8(xml);
+    } catch (e) {
+      falhas.push({ descricao: n.descricao, motivo: (e as Error).message });
+    }
+  });
+  const incluidas = Object.keys(arquivos).length;
+  return { zip: incluidas > 0 ? zipSync(arquivos) : null, incluidas, falhas };
+}
+
+const escHtml = (t: string) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
+const emailValido = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) && e.length <= 200;
+
 // ---------- tratamento ----------
 async function tratar(req: Request) {
   const authHeader = req.headers.get('Authorization');
@@ -201,21 +224,61 @@ async function tratar(req: Request) {
     if (notas.length === 0) throw new ErroHttp(404, 'Nenhuma nota emitida neste período.');
     if (notas.length > MAX_NOTAS_ZIP) throw new ErroHttp(413, `Mais de ${MAX_NOTAS_ZIP} notas no período. Reduza o período e baixe por partes.`);
 
-    const arquivos: Record<string, Uint8Array> = {};
-    const falhas: { descricao: string; motivo: string }[] = [];
-    await comConcorrencia(notas, CONCORRENCIA, async (n) => {
-      try {
-        const { chave, xml } = await xmlDaNota(urlNota, focus, n.ref);
-        let nome = `${chave || chaveLimpa(n.chave) || n.ref}.xml`;
-        if (arquivos[nome]) nome = `${n.ref}-${nome}`;
-        arquivos[nome] = strToU8(xml);
-      } catch (e) {
-        falhas.push({ descricao: n.descricao, motivo: (e as Error).message });
-      }
+    const { zip, incluidas, falhas } = await montarZipXml(notas, urlNota, focus);
+    if (!zip) throw new ErroHttp(502, `Não foi possível obter nenhum XML. ${falhas[0]?.motivo || ''}`.trim());
+    return jsonResponse({ ok: true, nome: `xml-notas_${de}_a_${ate}.zip`, base64: paraBase64(zip), incluidas, falhas });
+  }
+
+  // ----- envio do mês ao escritório contábil -----
+  if (action === 'enviar_escritorio') {
+    const mes = String(corpo?.mes || '');
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(mes)) throw new ErroHttp(400, 'Informe o mês (YYYY-MM).');
+    const { data: cfgEmail } = await service.from('configuracoes_fiscais')
+      .select('email_escritorio_contabil, razao_social, cnpj').eq('empresa_id', empresaId).maybeSingle();
+    const email = String(cfgEmail?.email_escritorio_contabil || '').trim();
+    if (!emailValido(email)) throw new ErroHttp(400, 'Cadastre o e-mail do escritório contábil antes de enviar.');
+
+    const [ano, m] = mes.split('-').map(Number);
+    const de = `${mes}-01`;
+    const ate = `${mes}-${String(new Date(ano, m, 0).getDate()).padStart(2, '0')}`;
+    const notas = await notasDoPeriodo(service, empresaId, de, ate, null);
+    if (notas.length === 0) throw new ErroHttp(404, 'Nenhuma nota emitida neste mês.');
+    if (notas.length > MAX_NOTAS_ZIP) throw new ErroHttp(413, `Mais de ${MAX_NOTAS_ZIP} notas no mês. Fale com o suporte para enviar por partes.`);
+
+    const { zip, incluidas, falhas } = await montarZipXml(notas, urlNota, focus);
+    if (!zip) throw new ErroHttp(502, `Não foi possível obter nenhum XML. ${falhas[0]?.motivo || ''}`.trim());
+    if (falhas.length > 0 && corpo?.forcar !== true) {
+      return jsonResponse({ ok: false, error: `${falhas.length} nota(s) não puderam ser baixadas da Focus. Envie mesmo assim ou tente de novo mais tarde.`, falhas, incluidas }, 409);
+    }
+
+    const resendApiKey = Deno.env.get('RESEND_API_KEY');
+    if (!resendApiKey) throw new ErroHttp(500, 'Envio de e-mail não configurado no servidor.');
+    const rotuloMes = `${String(m).padStart(2, '0')}/${ano}`;
+    const nomeEmpresa = cfgEmail?.razao_social || 'Empresa';
+    const nomeZip = `xml-notas_${mes}.zip`;
+    const html = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#222">
+      <p>Olá,</p>
+      <p>Seguem em anexo os XMLs das notas fiscais emitidas por <strong>${escHtml(nomeEmpresa)}</strong>${cfgEmail?.cnpj ? ` (CNPJ ${escHtml(cfgEmail.cnpj)})` : ''} no mês <strong>${rotuloMes}</strong>.</p>
+      <p>Total de notas no arquivo: <strong>${incluidas}</strong>${falhas.length > 0 ? ` (${falhas.length} nota(s) não puderam ser incluídas; serão enviadas à parte)` : ''}.</p>
+      <p style="color:#666;font-size:12px">Enviado automaticamente pelo Reddu.</p></div>`;
+    const resp = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${resendApiKey}` },
+      body: JSON.stringify({
+        from: 'Reddu <noreply@reddu.com.br>',
+        to: [email],
+        subject: `XMLs das notas fiscais ${rotuloMes} — ${nomeEmpresa}`,
+        html,
+        attachments: [{ filename: nomeZip, content: paraBase64(zip) }],
+      }),
     });
-    if (Object.keys(arquivos).length === 0) throw new ErroHttp(502, `Não foi possível obter nenhum XML. ${falhas[0]?.motivo || ''}`.trim());
-    const zip = zipSync(arquivos);
-    return jsonResponse({ ok: true, nome: `xml-notas_${de}_a_${ate}.zip`, base64: paraBase64(zip), incluidas: Object.keys(arquivos).length, falhas });
+    const retorno = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new ErroHttp(502, `Não foi possível enviar o e-mail: ${retorno?.message || resp.status}`);
+
+    await service.from('notas_fiscais_envios_escritorio').insert({
+      empresa_id: empresaId, mes, email, quantidade: incluidas, falhas: falhas.length, enviado_por: userData.user.id,
+    });
+    return jsonResponse({ ok: true, enviadas: incluidas, falhas, email });
   }
 
   // ----- completa chave/link de notas emitidas antigas -----

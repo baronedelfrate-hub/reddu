@@ -3,6 +3,7 @@ import { Helmet } from 'react-helmet';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/customSupabaseClient';
 import DashboardLayout from '@/components/DashboardLayout';
+import EnvioEscritorioNotas from '@/components/EnvioEscritorioNotas';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -53,8 +54,12 @@ const chamarArquivos = async (body) => {
   const { data, error } = await supabase.functions.invoke('notas-fiscais-arquivos', { body });
   if (error) {
     let msg = error.message;
-    try { const j = await error.context?.json?.(); if (j?.error) msg = j.error; } catch { /* mantém a mensagem */ }
-    throw new Error(msg);
+    let corpoErro = null;
+    try { corpoErro = await error.context?.json?.(); if (corpoErro?.error) msg = corpoErro.error; } catch { /* mantém a mensagem */ }
+    const err = new Error(msg);
+    err.corpo = corpoErro;
+    err.status = error.context?.status;
+    throw err;
   }
   if (data?.ok === false) throw new Error(data.error || 'Erro ao buscar os arquivos.');
   return data;
@@ -282,6 +287,8 @@ export default function NotasFiscaisPage() {
             </Button>
           </div>
         </div>
+
+        <EnvioEscritorioNotas empresaId={empresaId} chamar={chamarArquivos} />
 
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3 items-end border rounded-xl bg-white p-4">
           <div>
