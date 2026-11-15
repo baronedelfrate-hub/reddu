@@ -13,7 +13,7 @@
 //   xml       { fonte: 'vendas'|'reabastecimento'|'consignado', id }          -> { nome, xml }
 //   zip       { de, ate, origem? }  (datas YYYY-MM-DD; origem opcional)       -> { nome, base64, incluidas, falhas }
 //   completar { limite?, ignorar? }  notas emitidas sem chave/link: busca na Focus e grava -> { atualizadas, restantes, falhas }
-//   enviar_escritorio { mes: 'YYYY-MM', forcar? }  monta o ZIP dos XMLs do mês e envia por e-mail ao
+//   enviar_escritorio { mes: 'YYYY-MM', forcar?, empresa_id? (só chamada de serviço da rotina mensal) }  monta o ZIP dos XMLs do mês e envia por e-mail ao
 //             escritório contábil cadastrado (configuracoes_fiscais.email_escritorio_contabil) -> { enviadas, falhas, email }
 //
 // Deploy: precisa de "Verify JWT" LIGADO (padrão).
@@ -183,20 +183,34 @@ async function tratar(req: Request) {
   if (!authHeader) throw new ErroHttp(401, 'Não autenticado.');
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-  const userClient = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: authHeader } } });
-  // O token vai explícito: getUser() sem argumento procura uma sessão guardada (que não existe no
-  // servidor) e devolvia "Auth session missing" mesmo com o Authorization certo.
-  const jwt = authHeader.replace(/^Bearer\s+/i, '');
-  const { data: userData, error: userError } = await userClient.auth.getUser(jwt);
-  if (userError || !userData?.user) throw new ErroHttp(401, 'Sessão inválida. Entre novamente.');
-
-  const { data: usuarioRow } = await userClient.from('usuarios').select('empresa_id').eq('id', userData.user.id).maybeSingle();
-  if (!usuarioRow?.empresa_id) throw new ErroHttp(403, 'Usuário sem empresa vinculada.');
-  const empresaId: string = usuarioRow.empresa_id;
-
   const corpo = await req.json().catch(() => ({}));
   const action = corpo?.action;
   if (!action) throw new ErroHttp(400, 'Parâmetro obrigatório: action.');
+
+  const jwt = authHeader.replace(/^Bearer\s+/i, '');
+  // Chamada interna da rotina mensal (notas-fiscais-envio-automatico): vem com a chave de serviço,
+  // que só existe no servidor. Só pode pedir o envio do mês de UMA empresa.
+  const ehServico = jwt !== '' && jwt === Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+
+  let empresaId: string;
+  let usuarioId: string | null = null;
+  if (ehServico) {
+    if (action !== 'enviar_escritorio' || !/^[0-9a-f-]{36}$/i.test(String(corpo?.empresa_id || ''))) {
+      throw new ErroHttp(403, 'Chamada de serviço só pode enviar o mês de uma empresa.');
+    }
+    empresaId = String(corpo.empresa_id);
+  } else {
+    const userClient = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: authHeader } } });
+    // O token vai explícito: getUser() sem argumento procura uma sessão guardada (que não existe no
+    // servidor) e devolvia "Auth session missing" mesmo com o Authorization certo.
+    const { data: userData, error: userError } = await userClient.auth.getUser(jwt);
+    if (userError || !userData?.user) throw new ErroHttp(401, 'Sessão inválida. Entre novamente.');
+
+    const { data: usuarioRow } = await userClient.from('usuarios').select('empresa_id').eq('id', userData.user.id).maybeSingle();
+    if (!usuarioRow?.empresa_id) throw new ErroHttp(403, 'Usuário sem empresa vinculada.');
+    empresaId = usuarioRow.empresa_id;
+    usuarioId = userData.user.id;
+  }
 
   const service = createClient(supabaseUrl, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
   const { data: cfg } = await service.from('configuracoes_fiscais').select('token_api_focus, url_api_focus').eq('empresa_id', empresaId).maybeSingle();
@@ -276,7 +290,7 @@ async function tratar(req: Request) {
     if (!resp.ok) throw new ErroHttp(502, `Não foi possível enviar o e-mail: ${retorno?.message || resp.status}`);
 
     await service.from('notas_fiscais_envios_escritorio').insert({
-      empresa_id: empresaId, mes, email, quantidade: incluidas, falhas: falhas.length, enviado_por: userData.user.id,
+      empresa_id: empresaId, mes, email, quantidade: incluidas, falhas: falhas.length, enviado_por: usuarioId, origem: ehServico ? 'automatico' : 'manual',
     });
     return jsonResponse({ ok: true, enviadas: incluidas, falhas, email });
   }
