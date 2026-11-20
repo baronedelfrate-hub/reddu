@@ -12,7 +12,7 @@ import { Switch } from '@/components/ui/switch';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
-import { Loader2, MessageCircle, BellRing } from 'lucide-react';
+import { Loader2, MessageCircle, BellRing, BarChart3, Send } from 'lucide-react';
 
 // Quarta das 5 páginas que nasceram da antiga CardapioPage.jsx. Cuida do bot
 // de boas-vindas no WhatsApp e das notificações automáticas por status do
@@ -61,6 +61,14 @@ export default function CardapioWhatsappPage() {
   const [alertasEstoqueAtivo, setAlertasEstoqueAtivo] = useState(true);
   const [savingAlertas, setSavingAlertas] = useState(false);
 
+  // Resumo geral do dia (vendas por canal, mais vendidos e eventos) por WhatsApp pro dono.
+  const [resumoGeralAtivo, setResumoGeralAtivo] = useState(false);
+  const [resumoGeralHorario, setResumoGeralHorario] = useState('19:00');
+  const [resumoGeralNumero, setResumoGeralNumero] = useState('');
+  const [resumoGeralSalvo, setResumoGeralSalvo] = useState({ ativo: false, horario: '19:00', numero: '' });
+  const [savingResumoGeral, setSavingResumoGeral] = useState(false);
+  const [testandoResumoGeral, setTestandoResumoGeral] = useState(false);
+
   const loadData = useCallback(async () => {
     if (!empresaId) { setLoading(false); return; }
     setLoading(true);
@@ -104,6 +112,13 @@ export default function CardapioWhatsappPage() {
       setAlertasPedidoParadoAtivo(ag.pedido_parado_ativo !== false);
       setAlertasErroFiscalAtivo(ag.erro_fiscal_ativo !== false);
       setAlertasEstoqueAtivo(ag.estoque_baixo_ativo !== false);
+
+      const rg = c.resumo_geral || {};
+      const rgSalvo = { ativo: !!rg.ativo, horario: rg.horario || '19:00', numero: rg.whatsapp_numero || '' };
+      setResumoGeralAtivo(rgSalvo.ativo);
+      setResumoGeralHorario(rgSalvo.horario);
+      setResumoGeralNumero(rgSalvo.numero);
+      setResumoGeralSalvo(rgSalvo);
     } catch (error) {
       console.error('Erro ao carregar WhatsApp do cardápio:', error);
       toast({ title: 'Erro ao carregar', description: error.message, variant: 'destructive' });
@@ -186,6 +201,48 @@ export default function CardapioWhatsappPage() {
       toast({ title: 'Erro ao salvar', description: error.message, variant: 'destructive' });
     } finally {
       setSavingAlertas(false);
+    }
+  };
+
+  const handleSaveResumoGeral = async () => {
+    const numero = resumoGeralNumero.trim();
+    if (resumoGeralAtivo && numero.replace(/\D/g, '').length < 10) {
+      toast({ title: 'Informe o número de WhatsApp', description: 'Use o DDD + número, por exemplo 19988887777.', variant: 'destructive' });
+      return;
+    }
+    setSavingResumoGeral(true);
+    try {
+      const novoConfig = {
+        ...(empresa?.cardapio_config || {}),
+        resumo_geral: { ativo: resumoGeralAtivo, horario: resumoGeralHorario || '19:00', whatsapp_numero: numero || null },
+      };
+      const { error } = await supabase.from('empresas').update({ cardapio_config: novoConfig }).eq('id', empresaId);
+      if (error) throw error;
+      setEmpresa((prev) => ({ ...prev, cardapio_config: novoConfig }));
+      setResumoGeralSalvo({ ativo: resumoGeralAtivo, horario: resumoGeralHorario || '19:00', numero });
+      toast({ title: 'Resumo geral do dia salvo!' });
+    } catch (error) {
+      toast({ title: 'Erro ao salvar', description: error.message, variant: 'destructive' });
+    } finally {
+      setSavingResumoGeral(false);
+    }
+  };
+
+  const handleTestarResumoGeral = async () => {
+    setTestandoResumoGeral(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('resumo-geral-diario', { body: { teste: true } });
+      if (error) {
+        let msg = error.message;
+        try { const j = await error.context?.json?.(); if (j?.error) msg = j.error; } catch { /* mantém a mensagem */ }
+        throw new Error(msg);
+      }
+      if (data?.ok === false) throw new Error(data.error || 'Não foi possível enviar o teste.');
+      toast({ title: 'Resumo de teste enviado', description: 'Confira o WhatsApp do número cadastrado.' });
+    } catch (error) {
+      toast({ title: 'Não foi possível enviar o teste', description: error.message, variant: 'destructive' });
+    } finally {
+      setTestandoResumoGeral(false);
     }
   };
 
@@ -514,6 +571,50 @@ export default function CardapioWhatsappPage() {
           <Button onClick={handleSaveAlertas} disabled={savingAlertas}>
             {savingAlertas ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Salvar alertas do gestor'}
           </Button>
+        </div>
+
+        <div className="bg-white rounded-xl border p-4 space-y-4" data-testid="resumo-geral">
+          <div>
+            <Label className="text-gray-900 font-medium flex items-center gap-2">
+              <BarChart3 className="h-4 w-4" /> Resumo geral do dia (WhatsApp)
+            </Label>
+            <p className="text-sm text-gray-500">Todo dia, no horário escolhido, um resumo com as vendas do dia por canal (PDV, balcão, cardápio digital e mercados), os produtos mais vendidos e os eventos do dia. Pode ir para outra pessoa, como o dono.</p>
+          </div>
+
+          <div className="flex items-center justify-between border rounded-lg p-3">
+            <div>
+              <Label className="text-gray-900">Enviar resumo geral do dia</Label>
+              <p className="text-xs text-gray-400">Uma mensagem por dia, a partir do horário abaixo.</p>
+            </div>
+            <Switch checked={resumoGeralAtivo} onCheckedChange={setResumoGeralAtivo} data-testid="resumo-geral-ativo" />
+          </div>
+
+          {resumoGeralAtivo && (
+            <div className="grid sm:grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="resumo-geral-numero" className="text-gray-900">WhatsApp de quem recebe (com DDD)</Label>
+                <Input id="resumo-geral-numero" value={resumoGeralNumero} onChange={(e) => setResumoGeralNumero(e.target.value)} placeholder="19988887777" />
+              </div>
+              <div>
+                <Label htmlFor="resumo-geral-horario" className="text-gray-900">Horário de envio</Label>
+                <Input id="resumo-geral-horario" type="time" value={resumoGeralHorario} onChange={(e) => setResumoGeralHorario(e.target.value)} className="w-32" />
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-2 flex-wrap">
+            <Button onClick={handleSaveResumoGeral} disabled={savingResumoGeral} data-testid="resumo-geral-salvar">
+              {savingResumoGeral ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Salvar resumo geral'}
+            </Button>
+            <Button
+              variant="outline" onClick={handleTestarResumoGeral}
+              disabled={testandoResumoGeral || !resumoGeralSalvo.numero}
+              title={resumoGeralSalvo.numero ? 'Envia o resumo de hoje agora para o número salvo' : 'Salve o número antes de testar'}
+              className="gap-1.5" data-testid="resumo-geral-testar"
+            >
+              {testandoResumoGeral ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Enviar teste agora
+            </Button>
+          </div>
         </div>
       </div>
     </DashboardLayout>
