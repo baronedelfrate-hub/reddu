@@ -70,6 +70,7 @@ import EventosPage from './pages/EventosPage';
 import NovoEventoPage from './pages/NovoEventoPage';
 import EventoDetalhePage from './pages/EventoDetalhePage';
 import EventoPDFPage from './pages/EventoPDFPage';
+import RelatorioEventosPage from './pages/RelatorioEventosPage';
 import OrcamentoAprovacaoPage from './pages/OrcamentoAprovacaoPage';
 import ConfiguracoesFiscaisPage from './pages/ConfiguracoesFiscaisPage';
 import AssistenteIAPage from './pages/AssistenteIAPage';
@@ -118,6 +119,7 @@ function App() {
             
             {/* Rotas de Eventos */}
             <Route path="/dashboard/eventos" element={<ProtectedRoute><EventosPage /></ProtectedRoute>} />
+            <Route path="/dashboard/eventos/relatorio" element={<ProtectedRoute><RelatorioEventosPage /></ProtectedRoute>} />
             <Route path="/dashboard/eventos/novo" element={<ProtectedRoute><NovoEventoPage /></ProtectedRoute>} />
             <Route path="/dashboard/eventos/:id" element={<ProtectedRoute><EventoDetalhePage /></ProtectedRoute>} />
             <Route path="/dashboard/eventos/:id/editar" element={<ProtectedRoute><NovoEventoPage /></ProtectedRoute>} />

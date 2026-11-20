@@ -475,6 +475,7 @@ export default function DashboardLayout({ children }) {
       title: 'Eventos', icon: Calendar, color: 'bg-amber-500',
       items: [
         { name: 'Agenda de Eventos', href: '/dashboard/eventos', icon: Calendar },
+        { name: 'Relatório de Eventos', href: '/dashboard/eventos/relatorio', icon: BarChart3 },
       ]
     },
     {
