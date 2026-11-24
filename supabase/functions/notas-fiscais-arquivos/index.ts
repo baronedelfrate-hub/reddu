@@ -15,6 +15,10 @@
 //   completar { limite?, ignorar? }  notas emitidas sem chave/link: busca na Focus e grava -> { atualizadas, restantes, falhas }
 //   enviar_escritorio { mes: 'YYYY-MM', forcar?, empresa_id? (só chamada de serviço da rotina mensal) }  monta o ZIP dos XMLs do mês e envia por e-mail ao
 //             escritório contábil cadastrado (configuracoes_fiscais.email_escritorio_contabil) -> { enviadas, falhas, email }
+//   compras_listar {}                       notas de compra (NFes emitidas contra o CNPJ da empresa, recebidas pela Focus) -> { notas }
+//   compras_xml   { chave }                 XML completo de uma nota de compra                     -> { nome, xml }
+//   compras_pdf   { chave }                 DANFE (PDF) de uma nota de compra                      -> { nome, base64 }
+//   compras_zip   { de, ate }               XMLs completos das notas de compra do período          -> { nome, base64, incluidas, falhas }
 //
 // Deploy: precisa de "Verify JWT" LIGADO (padrão).
 
@@ -171,7 +175,102 @@ async function montarZipXml(notas: NotaRef[], urlNota: (ref: string) => string, 
     }
   });
   const incluidas = Object.keys(arquivos).length;
-  return { zip: incluidas > 0 ? zipSync(arquivos) : null, incluidas, falhas };
+  return { zip: incluidas > 0 ? zipSync(arquivos) : null, arquivos, incluidas, falhas };
+}
+
+// ---------- NFes recebidas (notas de compra) ----------
+const MAX_PAGINAS_RECEBIDAS = 20;
+const MAX_PDF_BYTES = 10 * 1024 * 1024;
+
+const dataEmissaoISO = (n: any) => String(n?.data_emissao || '').slice(0, 10);
+
+// Lê TODAS as notas recebidas (a Focus devolve 100 por consulta; o parâmetro "versao" traz o restante)
+// e fica com a versão mais nova de cada chave.
+async function listarRecebidas(focus: Focus, cnpj: string): Promise<any[]> {
+  const mapa = new Map<string, any>();
+  let versao: number | null = null;
+  for (let p = 0; p < MAX_PAGINAS_RECEBIDAS; p += 1) {
+    const url = `${focus.base}/v2/nfes_recebidas?cnpj=${encodeURIComponent(cnpj)}${versao !== null ? `&versao=${versao}` : ''}`;
+    const resp = await chamarFocus(url, focus);
+    const dados = await resp.json().catch(() => null);
+    if (!resp.ok) throw new Error(dados?.mensagem || dados?.codigo || `A Focus respondeu ${resp.status}.`);
+    if (!Array.isArray(dados) || dados.length === 0) break;
+    for (const n of dados) {
+      const k = chaveLimpa(n?.chave_nfe);
+      if (!k) continue;
+      const atual = mapa.get(k);
+      if (!atual || Number(n.versao) >= Number(atual.versao)) mapa.set(k, n);
+    }
+    const maxVersao = Number(resp.headers.get('x-max-version')) || Math.max(...dados.map((n: any) => Number(n.versao) || 0));
+    if (dados.length < 100 || (versao !== null && maxVersao <= versao)) break;
+    versao = maxVersao;
+  }
+  return [...mapa.values()];
+}
+
+function resumirRecebida(n: any) {
+  return {
+    chave: chaveLimpa(n.chave_nfe),
+    emitente: String(n.nome_emitente || ''),
+    documento_emitente: soDigitos(n.documento_emitente),
+    valor: Number(n.valor_total) || 0,
+    data_emissao: dataEmissaoISO(n),
+    situacao: String(n.situacao || ''),
+    completa: n.nfe_completa === true,
+    manifestacao: n.manifestacao_destinatario ?? null,
+    cancelada_em: n.data_cancelamento || null,
+  };
+}
+
+const chaveValida = (c: unknown) => /^\d{44}$/.test(String(c ?? ''));
+
+async function xmlRecebida(focus: Focus, chave: string): Promise<string> {
+  const resp = await chamarFocus(`${focus.base}/v2/nfes_recebidas/${chave}.xml`, focus);
+  if (!resp.ok) {
+    if (resp.status === 404) throw new Error('A Focus ainda não tem o XML completo desta nota.');
+    throw new Error(`Não foi possível baixar o XML (${resp.status}).`);
+  }
+  const xml = await resp.text();
+  if (!xml.trim().startsWith('<')) throw new Error('A Focus não devolveu um XML válido para esta nota.');
+  return xml;
+}
+
+// O DANFE vem por redirecionamento (302) para um endereço temporário do arquivo, que NÃO deve receber o
+// cabeçalho de autenticação da Focus.
+async function pdfRecebida(focus: Focus, chave: string): Promise<Uint8Array> {
+  const resp = await fetch(`${focus.base}/v2/nfes_recebidas/${chave}.pdf`, {
+    headers: { Authorization: focus.auth }, redirect: 'manual', signal: AbortSignal.timeout(TEMPO_CHAMADA_MS),
+  });
+  let alvo: Response = resp;
+  if (resp.status >= 300 && resp.status < 400) {
+    const local = resp.headers.get('location') || '';
+    let u: URL;
+    try { u = new URL(local, focus.base); } catch { throw new Error('A Focus devolveu um endereço de PDF inválido.'); }
+    if (u.protocol !== 'https:' || /^(\d+\.){3}\d+$/.test(u.hostname) || u.hostname === 'localhost') {
+      throw new Error('A Focus devolveu um endereço de PDF não permitido.');
+    }
+    alvo = await fetch(u.toString(), { signal: AbortSignal.timeout(TEMPO_CHAMADA_MS) });
+  }
+  if (!alvo.ok) throw new Error(alvo.status === 404 ? 'O PDF desta nota ainda não está disponível na Focus.' : `Não foi possível baixar o PDF (${alvo.status}).`);
+  const bytes = new Uint8Array(await alvo.arrayBuffer());
+  if (bytes.length === 0 || bytes.length > MAX_PDF_BYTES) throw new Error('O PDF devolvido pela Focus é inválido.');
+  return bytes;
+}
+
+// XMLs completos das notas de compra de um período → arquivos do ZIP
+async function xmlsDeCompras(focus: Focus, notas: any[]) {
+  const arquivos: Record<string, Uint8Array> = {};
+  const falhas: { descricao: string; motivo: string }[] = [];
+  await comConcorrencia(notas, CONCORRENCIA, async (n) => {
+    const nome = `${n.chave}.xml`;
+    try {
+      if (!n.completa) throw new Error('só o resumo da nota está na Focus (sem XML completo)');
+      arquivos[nome] = strToU8(await xmlRecebida(focus, n.chave));
+    } catch (e) {
+      falhas.push({ descricao: `${n.emitente || 'Nota'} (${n.data_emissao})`, motivo: (e as Error).message });
+    }
+  });
+  return { arquivos, falhas };
 }
 
 const escHtml = (t: string) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
@@ -213,7 +312,7 @@ async function tratar(req: Request) {
   }
 
   const service = createClient(supabaseUrl, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-  const { data: cfg } = await service.from('configuracoes_fiscais').select('token_api_focus, url_api_focus').eq('empresa_id', empresaId).maybeSingle();
+  const { data: cfg } = await service.from('configuracoes_fiscais').select('token_api_focus, url_api_focus, cnpj').eq('empresa_id', empresaId).maybeSingle();
   if (!cfg?.token_api_focus || !cfg?.url_api_focus) throw new ErroHttp(400, 'Token ou URL da Focus NFe não configurados nas configurações fiscais.');
   const { focus, urlNota } = configurarFocus(cfg.url_api_focus, cfg.token_api_focus);
 
@@ -243,6 +342,51 @@ async function tratar(req: Request) {
     return jsonResponse({ ok: true, nome: `xml-notas_${de}_a_${ate}.zip`, base64: paraBase64(zip), incluidas, falhas });
   }
 
+  // ----- notas de compra (NFes recebidas) -----
+  if (typeof action === 'string' && action.startsWith('compras_')) {
+    const cnpj = soDigitos(cfg.cnpj);
+    if (cnpj.length !== 14) throw new ErroHttp(400, 'CNPJ da empresa não configurado nas configurações fiscais.');
+
+    if (action === 'compras_listar') {
+      try {
+        const notas = (await listarRecebidas(focus, cnpj)).map(resumirRecebida)
+          .sort((a, b) => (a.data_emissao < b.data_emissao ? 1 : a.data_emissao > b.data_emissao ? -1 : 0));
+        return jsonResponse({ ok: true, notas });
+      } catch (e) {
+        throw new ErroHttp(502, `Não foi possível consultar as notas de compra: ${(e as Error).message}`);
+      }
+    }
+
+    if (action === 'compras_xml' || action === 'compras_pdf') {
+      if (!chaveValida(corpo?.chave)) throw new ErroHttp(400, 'Informe a chave de 44 dígitos.');
+      const chave = String(corpo.chave);
+      try {
+        if (action === 'compras_xml') return jsonResponse({ ok: true, nome: `${chave}.xml`, xml: await xmlRecebida(focus, chave) });
+        return jsonResponse({ ok: true, nome: `${chave}.pdf`, base64: paraBase64(await pdfRecebida(focus, chave)) });
+      } catch (e) {
+        throw new ErroHttp(502, (e as Error).message);
+      }
+    }
+
+    if (action === 'compras_zip') {
+      const de = String(corpo?.de || ''); const ate = String(corpo?.ate || '');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) throw new ErroHttp(400, 'Informe o período (de e ate, YYYY-MM-DD).');
+      let notas: any[];
+      try {
+        notas = (await listarRecebidas(focus, cnpj)).map(resumirRecebida).filter((n) => n.data_emissao >= de && n.data_emissao <= ate);
+      } catch (e) {
+        throw new ErroHttp(502, `Não foi possível consultar as notas de compra: ${(e as Error).message}`);
+      }
+      if (notas.length === 0) throw new ErroHttp(404, 'Nenhuma nota de compra neste período.');
+      if (notas.length > MAX_NOTAS_ZIP) throw new ErroHttp(413, `Mais de ${MAX_NOTAS_ZIP} notas no período. Reduza o período e baixe por partes.`);
+      const { arquivos, falhas } = await xmlsDeCompras(focus, notas);
+      if (Object.keys(arquivos).length === 0) throw new ErroHttp(502, `Nenhuma nota tem o XML completo na Focus. ${falhas[0]?.motivo || ''}`.trim());
+      return jsonResponse({ ok: true, nome: `xml-compras_${de}_a_${ate}.zip`, base64: paraBase64(zipSync(arquivos)), incluidas: Object.keys(arquivos).length, falhas });
+    }
+
+    throw new ErroHttp(400, `Ação desconhecida: ${action}`);
+  }
+
   // ----- envio do mês ao escritório contábil -----
   if (action === 'enviar_escritorio') {
     const mes = String(corpo?.mes || '');
@@ -256,24 +400,57 @@ async function tratar(req: Request) {
     const de = `${mes}-01`;
     const ate = `${mes}-${String(new Date(ano, m, 0).getDate()).padStart(2, '0')}`;
     const notas = await notasDoPeriodo(service, empresaId, de, ate, null);
-    if (notas.length === 0) throw new ErroHttp(404, 'Nenhuma nota emitida neste mês.');
     if (notas.length > MAX_NOTAS_ZIP) throw new ErroHttp(413, `Mais de ${MAX_NOTAS_ZIP} notas no mês. Fale com o suporte para enviar por partes.`);
 
-    const { zip, incluidas, falhas } = await montarZipXml(notas, urlNota, focus);
-    if (!zip) throw new ErroHttp(502, `Não foi possível obter nenhum XML. ${falhas[0]?.motivo || ''}`.trim());
+    // Notas de compra (NFes recebidas) do mês: entram numa pasta "compras" do mesmo ZIP. Se a consulta
+    // falhar (ex.: recebimento não habilitado), o envio das emitidas segue e o e-mail avisa.
+    let compras: any[] = [];
+    let comprasErro = '';
+    const cnpjEmpresa = soDigitos(cfgEmail?.cnpj);
+    if (corpo?.incluir_compras !== false && cnpjEmpresa.length === 14) {
+      try {
+        compras = (await listarRecebidas(focus, cnpjEmpresa)).map(resumirRecebida).filter((n) => n.data_emissao >= de && n.data_emissao <= ate);
+      } catch (e) {
+        comprasErro = (e as Error).message;
+      }
+    }
+    if (compras.length > MAX_NOTAS_ZIP) throw new ErroHttp(413, `Mais de ${MAX_NOTAS_ZIP} notas de compra no mês. Fale com o suporte para enviar por partes.`);
+    if (notas.length === 0 && compras.length === 0) throw new ErroHttp(404, 'Nenhuma nota emitida nem de compra neste mês.');
+
+    const emit = notas.length > 0 ? await montarZipXml(notas, urlNota, focus) : { zip: null, arquivos: {} as Record<string, Uint8Array>, incluidas: 0, falhas: [] as { descricao: string; motivo: string }[] };
+    const cmp = compras.length > 0 ? await xmlsDeCompras(focus, compras) : { arquivos: {} as Record<string, Uint8Array>, falhas: [] as { descricao: string; motivo: string }[] };
+    const nEmitidas = emit.incluidas;
+    const nCompras = Object.keys(cmp.arquivos).length;
+    if (nEmitidas + nCompras === 0) {
+      throw new ErroHttp(502, `Não foi possível obter nenhum XML. ${(emit.falhas[0] || cmp.falhas[0])?.motivo || ''}`.trim());
+    }
+    const falhas = emit.falhas;
+    const incluidas = nEmitidas + nCompras;
     if (falhas.length > 0 && corpo?.forcar !== true) {
       return jsonResponse({ ok: false, error: `${falhas.length} nota(s) não puderam ser baixadas da Focus. Envie mesmo assim ou tente de novo mais tarde.`, falhas, incluidas }, 409);
     }
+
+    const todos: Record<string, Uint8Array> = { ...emit.arquivos };
+    Object.entries(cmp.arquivos).forEach(([nome, bytes]) => { todos[`compras/${nome}`] = bytes; });
+    const zip = zipSync(todos);
 
     const resendApiKey = Deno.env.get('RESEND_API_KEY');
     if (!resendApiKey) throw new ErroHttp(500, 'Envio de e-mail não configurado no servidor.');
     const rotuloMes = `${String(m).padStart(2, '0')}/${ano}`;
     const nomeEmpresa = cfgEmail?.razao_social || 'Empresa';
     const nomeZip = `xml-notas_${mes}.zip`;
+    const linhasEmail = [
+      `<p>Seguem em anexo os XMLs das notas fiscais de <strong>${escHtml(nomeEmpresa)}</strong>${cfgEmail?.cnpj ? ` (CNPJ ${escHtml(cfgEmail.cnpj)})` : ''} do mês <strong>${rotuloMes}</strong>.</p>`,
+      `<p>Notas <strong>emitidas</strong> (vendas), na raiz do arquivo: <strong>${nEmitidas}</strong>${falhas.length > 0 ? ` (${falhas.length} nota(s) não puderam ser incluídas; serão enviadas à parte)` : ''}.</p>`,
+    ];
+    if (compras.length > 0 || comprasErro) {
+      linhasEmail.push(comprasErro
+        ? '<p>Notas de <strong>compra</strong> (emitidas contra o CNPJ): não foi possível consultá-las desta vez.</p>'
+        : `<p>Notas de <strong>compra</strong> (emitidas contra o CNPJ), na pasta <em>compras</em>: <strong>${nCompras}</strong>${cmp.falhas.length > 0 ? ` (${cmp.falhas.length} ainda sem o XML completo na Focus)` : ''}.</p>`);
+    }
     const html = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#222">
       <p>Olá,</p>
-      <p>Seguem em anexo os XMLs das notas fiscais emitidas por <strong>${escHtml(nomeEmpresa)}</strong>${cfgEmail?.cnpj ? ` (CNPJ ${escHtml(cfgEmail.cnpj)})` : ''} no mês <strong>${rotuloMes}</strong>.</p>
-      <p>Total de notas no arquivo: <strong>${incluidas}</strong>${falhas.length > 0 ? ` (${falhas.length} nota(s) não puderam ser incluídas; serão enviadas à parte)` : ''}.</p>
+      ${linhasEmail.join('\n      ')}
       <p style="color:#666;font-size:12px">Enviado automaticamente pelo Reddu.</p></div>`;
     const resp = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -290,9 +467,9 @@ async function tratar(req: Request) {
     if (!resp.ok) throw new ErroHttp(502, `Não foi possível enviar o e-mail: ${retorno?.message || resp.status}`);
 
     await service.from('notas_fiscais_envios_escritorio').insert({
-      empresa_id: empresaId, mes, email, quantidade: incluidas, falhas: falhas.length, enviado_por: usuarioId, origem: ehServico ? 'automatico' : 'manual',
+      empresa_id: empresaId, mes, email, quantidade: incluidas, falhas: falhas.length + cmp.falhas.length, enviado_por: usuarioId, origem: ehServico ? 'automatico' : 'manual',
     });
-    return jsonResponse({ ok: true, enviadas: incluidas, falhas, email });
+    return jsonResponse({ ok: true, enviadas: incluidas, emitidas: nEmitidas, compras: nCompras, compras_sem_xml: cmp.falhas.length, compras_erro: comprasErro || null, falhas, email });
   }
 
   // ----- completa chave/link de notas emitidas antigas -----
