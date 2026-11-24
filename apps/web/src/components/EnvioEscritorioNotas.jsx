@@ -98,7 +98,7 @@ export default function EnvioEscritorioNotas({ empresaId, chamar }) {
     setEnviando(true);
     try {
       const r = await chamar({ action: 'enviar_escritorio', mes, forcar });
-      toast({ title: 'E-mail enviado ao escritório', description: `${r.enviadas} nota(s) de ${rotuloMes(mes)} enviadas para ${r.email}.` });
+      toast({ title: 'E-mail enviado ao escritório', description: `${r.emitidas ?? r.enviadas} nota(s) emitida(s)${r.compras ? ` e ${r.compras} de compra` : ''} de ${rotuloMes(mes)} enviadas para ${r.email}.${r.compras_erro ? ' As notas de compra não puderam ser consultadas desta vez.' : ''}` });
       await carregar();
     } catch (e) {
       if (e.status === 409 && e.corpo?.falhas) {
@@ -137,7 +137,7 @@ export default function EnvioEscritorioNotas({ empresaId, chamar }) {
           {enviando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Enviar XMLs do mês
         </Button>
       </div>
-      <p className="text-xs text-gray-500">Envia um ZIP com os XMLs de todas as notas emitidas no mês (PDV, cardápio, reabastecimento e consignado) para o e-mail salvo acima.</p>
+      <p className="text-xs text-gray-500">Envia um ZIP com os XMLs das notas emitidas no mês (PDV, cardápio, reabastecimento e consignado) e, na pasta "compras", os XMLs das notas de compra (fornecedores) do mês, para o e-mail salvo acima.</p>
       <div className="border-t pt-3 space-y-2" data-testid="envio-automatico">
         <label className="flex items-center gap-2 text-sm text-gray-900 font-medium cursor-pointer">
           <input type="checkbox" className="h-4 w-4" checked={autoAtivo} onChange={(e) => setAutoAtivo(e.target.checked)} data-testid="auto-ativo" />

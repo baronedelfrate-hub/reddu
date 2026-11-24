@@ -492,6 +492,7 @@ export default function DashboardLayout({ children }) {
       title: 'Fiscal', icon: Receipt, color: 'bg-sky-500',
       items: [
         { name: 'Notas Fiscais', href: '/dashboard/notas-fiscais', icon: FileCheck },
+        { name: 'Notas de Compra', href: '/dashboard/notas-compra', icon: ShoppingCart },
         { name: 'Config. Fiscais', href: '/configuracoes-fiscais', icon: Settings2 },
       ]
     },
