@@ -195,8 +195,9 @@ export default function PedidosCardapioPage() {
       return `<div class="info">Forma de pagamento: ${rotuloFormaPagamento(online)} (online)</div>`
         + `<div class="info bold">${pago ? '* PAGO - nao cobrar *' : '* PAGAMENTO ONLINE PENDENTE *'}</div>`;
     }
-    const tipoEntrega = pedido.pagamento_entrega_tipo; // 'dinheiro' | 'cartao' | null (pedidos antigos)
+    const tipoEntrega = pedido.pagamento_entrega_tipo; // 'dinheiro' | 'cartao' | 'pix' | null (pedidos antigos)
     const forma = tipoEntrega === 'cartao' ? 'Cartão (maquininha)'
+      : tipoEntrega === 'pix' ? 'Pix'
       : tipoEntrega === 'dinheiro' ? 'Dinheiro'
         : rotuloFormaPagamento(pedido.vendas?.forma_pagamento);
     const quando = pedido.tipo_entrega === 'entrega' ? 'na entrega' : 'na retirada';
@@ -695,7 +696,7 @@ export default function PedidosCardapioPage() {
                               )}
                               {pedido.pagamento_entrega_tipo && !pedido.forma_pagamento_online && (
                                 <span className="ml-1 inline-flex items-center text-[10px] bg-sky-100 text-sky-700 rounded-full px-1.5 py-0.5 align-middle">
-                                  {pedido.pagamento_entrega_tipo === 'cartao' ? '💳 Cartão na entrega' : `💵 Dinheiro${Number(pedido.troco_para) > 0 ? ` (troco p/ ${Number(pedido.troco_para).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })})` : ''}`}
+                                  {pedido.pagamento_entrega_tipo === 'cartao' ? '💳 Cartão na entrega' : pedido.pagamento_entrega_tipo === 'pix' ? '📱 Pix na entrega' : `💵 Dinheiro${Number(pedido.troco_para) > 0 ? ` (troco p/ ${Number(pedido.troco_para).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })})` : ''}`}
                                 </span>
                               )}
                             </p>

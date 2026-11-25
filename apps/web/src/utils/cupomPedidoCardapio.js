@@ -62,6 +62,7 @@ const montarPagamentoHtml = (pedido) => {
   }
   const tipoEntrega = pedido.pagamento_entrega_tipo;
   const forma = tipoEntrega === 'cartao' ? 'Cartão (maquininha)'
+    : tipoEntrega === 'pix' ? 'Pix'
     : tipoEntrega === 'dinheiro' ? 'Dinheiro'
       : rotuloFormaPagamento(pedido.vendas?.forma_pagamento);
   const quando = pedido.tipo_entrega === 'entrega' ? 'na entrega' : 'na retirada';

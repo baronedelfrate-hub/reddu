@@ -543,7 +543,7 @@ export default function PedidosBalcaoPage() {
 
   // ----------------------------------------------------------------- UI
   const resumoEntrega = entrega.tipo === 'entrega' ? (enderecoCompleto ? 'Entrega' : 'Entrega (sem endereço)') : 'Retirada';
-  const rotuloPag = pagamento.tipo === 'cartao' ? 'Cartão' : (trocoNum > 0 ? `Dinheiro (troco ${formatPreco(trocoNum)})` : 'Dinheiro');
+  const rotuloPag = pagamento.tipo === 'cartao' ? 'Cartão' : pagamento.tipo === 'pix' ? 'Pix' : (trocoNum > 0 ? `Dinheiro (troco ${formatPreco(trocoNum)})` : 'Dinheiro');
 
   const conteudo = (() => {
     if (carregando) {
@@ -670,10 +670,14 @@ export default function PedidosBalcaoPage() {
                         <span className="text-sm font-bold text-gray-900 whitespace-nowrap">{formatPreco(precoLinha(c))}</span>
                       </div>
                       {c.isCombo && c.sabores.length > 0 && (
-                        <p className="text-[11px] text-gray-600 mt-0.5">{c.sabores.map((s) => `${s.quantidade}x ${s.nome}`).join(', ')}</p>
+                        <ul className="text-[11px] text-gray-700 mt-1 space-y-0.5" data-testid="sabores-carrinho">
+                          {c.sabores.map((s) => <li key={s.opcaoId || s.nome}>{s.quantidade}x {s.nome}</li>)}
+                        </ul>
                       )}
                       {(c.adicionais || []).length > 0 && (
-                        <p className="text-[11px] text-gray-600">+ {c.adicionais.map((a) => a.nome).join(', ')}</p>
+                        <ul className="text-[11px] text-gray-600 mt-0.5 space-y-0.5">
+                          {c.adicionais.map((a, i) => <li key={a.opcaoId || i}>+ {a.nome}</li>)}
+                        </ul>
                       )}
                       <div className="flex items-center justify-between mt-1.5">
                         <div className="flex items-center gap-1">
@@ -931,8 +935,8 @@ export default function PedidosBalcaoPage() {
               <DialogTitle>Forma de pagamento</DialogTitle>
               <DialogDescription>Como o cliente vai pagar na retirada/entrega.</DialogDescription>
             </DialogHeader>
-            <div className="grid grid-cols-2 gap-2">
-              {[['dinheiro', 'Dinheiro'], ['cartao', 'Cartão (maquininha)']].map(([v, l]) => (
+            <div className="grid grid-cols-3 gap-2">
+              {[['dinheiro', 'Dinheiro'], ['cartao', 'Cartão (maquininha)'], ['pix', 'Pix']].map(([v, l]) => (
                 <button key={v} type="button" onClick={() => setPagamento((p) => ({ ...p, tipo: v }))} className={`h-10 rounded border text-sm font-semibold ${pagamento.tipo === v ? 'bg-red-600 text-white border-red-600' : 'border-gray-300 text-gray-700'}`}>{l}</button>
               ))}
             </div>

@@ -86,6 +86,7 @@ const infoPagamento = (p) => {
     return { texto: `Dinheiro ${quando}${troco > 0 ? ` (troco p/ ${formatarPreco(troco)})` : ''}`, cls: 'bg-gray-50 text-gray-700 border-gray-200', pago: false };
   }
   if (p.pagamento_entrega_tipo === 'cartao') return { texto: `Cartão ${quando}`, cls: 'bg-gray-50 text-gray-700 border-gray-200', pago: false };
+  if (p.pagamento_entrega_tipo === 'pix') return { texto: `Pix ${quando}`, cls: 'bg-gray-50 text-gray-700 border-gray-200', pago: false };
   const f = p.vendas?.forma_pagamento;
   return { texto: f && f !== 'A combinar' ? `${rotuloFormaPagamento(f)} (${quando})` : `A pagar ${quando}`, cls: 'bg-gray-50 text-gray-700 border-gray-200', pago: false };
 };
