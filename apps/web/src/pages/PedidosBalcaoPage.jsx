@@ -3,7 +3,7 @@ import { Helmet } from 'react-helmet';
 import { Link } from 'react-router-dom';
 import {
   Search, Plus, Minus, Trash2, Loader2, ImageOff, MapPin, Wallet, FileText, CalendarClock,
-  MessageSquare, CheckCircle2, Store, Bike, ShoppingBag, UserRound,
+  MessageSquare, CheckCircle2, Store, Bike, ShoppingBag, UserRound, Tag,
 } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { Button } from '@/components/ui/button';
@@ -98,7 +98,11 @@ export default function PedidosBalcaoPage() {
   const [ultimoPedido, setUltimoPedido] = useState(null);
 
   // dialogs
-  const [dlg, setDlg] = useState(null); // 'entrega' | 'pagamento' | 'cpf' | 'agendar' | 'obs'
+  const [dlg, setDlg] = useState(null); // 'entrega' | 'pagamento' | 'cpf' | 'agendar' | 'obs' | 'ajuste'
+  // Ajustar valor (desconto): tipo 'valor' (R$), 'percentual' (%) ou 'cupom'. Só vale depois de "Aplicar".
+  const [ajuste, setAjuste] = useState(null); // { tipo, valor, codigo }
+  const [ajusteForm, setAjusteForm] = useState({ tipo: 'valor', valor: '', codigo: '' });
+  const [descontoCupom, setDescontoCupom] = useState({ desconto: 0, erro: '', validando: false });
   const [comboAberto, setComboAberto] = useState(null);
   const [comboSelecoes, setComboSelecoes] = useState({});
   const [adicionaisSel, setAdicionaisSel] = useState({});
@@ -327,8 +331,33 @@ export default function PedidosBalcaoPage() {
   const taxaAplicada = entrega.tipo !== 'entrega' ? 0
     : manualPreenchida ? taxaManualNum
       : (entrega.taxaInfo ? (usaTaxaRetorno ? taxaRetornoFaixa : (entrega.taxaInfo.taxa || 0)) : 0);
-  const total = subtotal + taxaAplicada;
+  const numeroAjuste = (v) => { const n = Number(String(v ?? '').replace(',', '.')); return Number.isFinite(n) && n > 0 ? n : 0; };
+  const descontoAplicado = (() => {
+    if (!ajuste || subtotal <= 0) return 0;
+    if (ajuste.tipo === 'valor') return Math.min(Math.round(numeroAjuste(ajuste.valor) * 100) / 100, subtotal);
+    if (ajuste.tipo === 'percentual') return Math.round(subtotal * Math.min(numeroAjuste(ajuste.valor), 100)) / 100;
+    if (ajuste.tipo === 'cupom') return Math.min(descontoCupom.desconto || 0, subtotal);
+    return 0;
+  })();
+  const total = Math.max(0, subtotal + taxaAplicada - descontoAplicado);
   const trocoNum = Number(String(pagamento.troco).replace(',', '.')) || 0;
+
+  useEffect(() => {
+    if (ajuste?.tipo !== 'cupom' || !ajuste.codigo || !empresaId) { setDescontoCupom({ desconto: 0, erro: '', validando: false }); return undefined; }
+    if (subtotal <= 0) { setDescontoCupom({ desconto: 0, erro: '', validando: false }); return undefined; }
+    let cancelado = false;
+    setDescontoCupom((d) => ({ ...d, validando: true }));
+    const t = setTimeout(async () => {
+      const { data, error } = await supabase.rpc('rpc_validar_cupom_cardapio', {
+        p_empresa_id: empresaId, p_codigo: ajuste.codigo, p_subtotal: subtotal, p_cliente_telefone: soDigitos(form.telefone) || null,
+      });
+      if (cancelado) return;
+      if (error) setDescontoCupom({ desconto: 0, erro: error.message, validando: false });
+      else if (!data?.valido) setDescontoCupom({ desconto: 0, erro: data?.motivo || 'Cupom inválido.', validando: false });
+      else setDescontoCupom({ desconto: Number(data.desconto) || 0, erro: '', validando: false });
+    }, 250);
+    return () => { cancelado = true; clearTimeout(t); };
+  }, [ajuste, subtotal, form.telefone, empresaId]);
 
   const digitarEndereco = (texto) => {
     setEntrega((e) => ({ ...e, rua: texto, taxaInfo: null }));
@@ -425,6 +454,8 @@ export default function PedidosBalcaoPage() {
     setForm(FORM_VAZIO);
     setEntrega(ENTREGA_VAZIA);
     setPagamento({ tipo: 'dinheiro', troco: '' });
+    setAjuste(null);
+    setAjusteForm({ tipo: 'valor', valor: '', codigo: '' });
     setDataAgendamento('');
     setSugestoesCliente([]);
     setClienteReconhecido(null);
@@ -447,6 +478,12 @@ export default function PedidosBalcaoPage() {
     }
     const doc = soDigitos(form.cpf);
     if (doc && doc.length !== 11 && doc.length !== 14) { toast({ title: 'CPF/CNPJ incompleto', variant: 'destructive' }); setDlg('cpf'); return; }
+    if (ajuste?.tipo === 'cupom' && (descontoCupom.erro || descontoCupom.validando || !(descontoCupom.desconto > 0))) {
+      toast({ title: 'Cupom não aplicado', description: descontoCupom.erro || 'Confira o cupom em Ajustar valor.', variant: 'destructive' });
+      setDlg('ajuste');
+      return;
+    }
+    const descontoManual = ajuste && (ajuste.tipo === 'valor' || ajuste.tipo === 'percentual') ? descontoAplicado : 0;
 
     setEnviando(true);
     try {
@@ -465,7 +502,7 @@ export default function PedidosBalcaoPage() {
           ...((c.adicionais || []).length > 0 ? { adicionais: c.adicionais.map((a) => ({ opcao_id: a.opcaoId })) } : {}),
         })),
         p_data_agendamento: dataAgendamento ? new Date(dataAgendamento).toISOString() : null,
-        p_cupom_codigo: null,
+        p_cupom_codigo: ajuste?.tipo === 'cupom' ? ajuste.codigo : null,
         p_taxa_entrega: taxaAplicada,
       });
       if (error) throw error;
@@ -476,6 +513,14 @@ export default function PedidosBalcaoPage() {
       if (aceiteError) {
         console.error('Erro ao aceitar pedido do balcão:', aceiteError);
         toast({ title: `Pedido #${data.numero_pedido} criado, mas não foi aceito automaticamente`, description: 'Abra Pedidos Agendados e aceite manualmente.', variant: 'destructive' });
+      }
+
+      if (descontoManual > 0) {
+        const { error: descErr } = await supabase.rpc('rpc_aplicar_desconto_balcao', { p_pedido_id: data.id, p_valor: descontoManual });
+        if (descErr) {
+          console.error('Erro ao aplicar desconto no pedido do balcão:', descErr);
+          toast({ title: `Pedido #${data.numero_pedido} criado SEM o desconto`, description: `${descErr.message?.replace(/^.*ERROR:\s*/i, '')} Ajuste o valor com o cliente.`, variant: 'destructive' });
+        }
       }
 
       const { error: pagErr } = await supabase.rpc('rpc_definir_pagamento_entrega', {
@@ -526,12 +571,13 @@ export default function PedidosBalcaoPage() {
       else if (k === 'r') { e.preventDefault(); setDlg('pagamento'); }
       else if (k === 't') { e.preventDefault(); setDlg('cpf'); }
       else if (k === 'g') { e.preventDefault(); setDlg('agendar'); }
+      else if (k === 'y') { e.preventDefault(); setAjusteForm(ajuste ? { tipo: ajuste.tipo, valor: ajuste.valor || '', codigo: ajuste.codigo || '' } : { tipo: 'valor', valor: '', codigo: '' }); setDlg('ajuste'); }
       else if (k === '0') { e.preventDefault(); setDlg('obs'); }
       else if (k === 'c') { e.preventDefault(); telefoneRef.current?.focus(); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [dlg, comboAberto]);
+  }, [dlg, comboAberto, ajuste]);
 
   const onNavKey = (e, idx) => {
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
@@ -699,6 +745,9 @@ export default function PedidosBalcaoPage() {
 
             <div className="border-t border-gray-200 px-3 py-2 text-xs text-gray-700 space-y-1">
               <div className="flex justify-between"><span>Subtotal</span><span>{formatPreco(subtotal)}</span></div>
+              {descontoAplicado > 0 && (
+                <div className="flex justify-between text-emerald-700" data-testid="linha-desconto"><span>Desconto{ajuste?.tipo === 'percentual' ? ` (${numeroAjuste(ajuste.valor)}%)` : ajuste?.tipo === 'cupom' ? ` (cupom ${ajuste.codigo})` : ''}</span><span>-{formatPreco(descontoAplicado)}</span></div>
+              )}
               <div className="flex justify-between"><span>Entrega</span><span className={taxaAplicada > 0 ? '' : 'text-red-600'}>{entrega.tipo === 'entrega' ? formatPreco(taxaAplicada) : 'Retirada'}</span></div>
               {dataAgendamento && (
                 <div className="flex justify-between"><span>Agendado</span><span>{new Date(dataAgendamento).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</span></div>
@@ -771,6 +820,16 @@ export default function PedidosBalcaoPage() {
                   <CalendarClock className="h-3.5 w-3.5" /> [ G ] {dataAgendamento ? 'Agendado' : 'Agendar'}
                 </button>
               </div>
+
+              <button
+                type="button"
+                onClick={() => { setAjusteForm(ajuste ? { tipo: ajuste.tipo, valor: ajuste.valor || '', codigo: ajuste.codigo || '' } : { tipo: 'valor', valor: '', codigo: '' }); setDlg('ajuste'); }}
+                disabled={cart.length === 0}
+                data-testid="btn-ajustar-valor"
+                className={`w-full h-9 rounded border text-xs font-semibold flex items-center justify-center gap-1 disabled:opacity-40 ${descontoAplicado > 0 ? 'border-emerald-500 text-emerald-700 bg-emerald-50' : 'border-blue-400 text-blue-700 hover:bg-blue-50'}`}
+              >
+                <Tag className="h-3.5 w-3.5" /> [ Y ] {descontoAplicado > 0 ? `Desconto ${formatPreco(descontoAplicado)}` : 'Ajustar valor'}
+              </button>
 
               <button
                 type="button"
@@ -925,6 +984,65 @@ export default function PedidosBalcaoPage() {
               </div>
             )}
             <DialogFooter><Button onClick={() => setDlg(null)}>Pronto</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Ajustar valor (desconto) */}
+        <Dialog open={dlg === 'ajuste'} onOpenChange={(o) => !o && setDlg(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Ajustar valor do pedido</DialogTitle>
+              <DialogDescription>Desconto sobre o valor dos itens. A taxa de entrega não entra no desconto.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2">
+              {[['valor', 'Valor fixo (R$)'], ['percentual', 'Percentual (%)'], ['cupom', 'Cupom de desconto']].map(([v, l]) => (
+                <label key={v} className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input type="radio" name="ajuste-tipo" checked={ajusteForm.tipo === v} onChange={() => setAjusteForm((f) => ({ ...f, tipo: v }))} data-testid={`ajuste-tipo-${v}`} /> {l}
+                </label>
+              ))}
+            </div>
+            {ajusteForm.tipo === 'cupom' ? (
+              <div>
+                <label className="text-xs text-gray-600">Código do cupom</label>
+                <input autoFocus value={ajusteForm.codigo} onChange={(e) => setAjusteForm((f) => ({ ...f, codigo: e.target.value.toUpperCase() }))} placeholder="Ex.: BEMVINDO10" data-testid="ajuste-codigo" className="w-full h-10 px-3 rounded border border-gray-300 text-sm" />
+              </div>
+            ) : (
+              <div>
+                <label className="text-xs text-gray-600">{ajusteForm.tipo === 'percentual' ? 'Percentual de desconto' : 'Valor do desconto'}</label>
+                <input
+                  autoFocus value={ajusteForm.valor} inputMode="decimal" data-testid="ajuste-valor"
+                  onChange={(e) => setAjusteForm((f) => ({ ...f, valor: e.target.value }))}
+                  placeholder={ajusteForm.tipo === 'percentual' ? 'Ex.: 10' : 'Ex.: 5,00'}
+                  className="w-full h-10 px-3 rounded border border-gray-300 text-sm"
+                />
+                {(() => {
+                  const n = numeroAjuste(ajusteForm.valor);
+                  const prev = ajusteForm.tipo === 'percentual' ? Math.round(subtotal * Math.min(n, 100)) / 100 : Math.min(n, subtotal);
+                  if (!(n > 0)) return null;
+                  return <p className="text-xs text-gray-500 mt-1" data-testid="ajuste-previa">Desconto de {formatPreco(prev)} · novo subtotal {formatPreco(Math.max(0, subtotal - prev))}{ajusteForm.tipo === 'valor' && n > subtotal ? ' (limitado ao valor dos itens)' : ''}</p>;
+                })()}
+              </div>
+            )}
+            <DialogFooter className="gap-2">
+              {ajuste && <Button variant="outline" onClick={() => { setAjuste(null); setDlg(null); }} data-testid="ajuste-remover">Remover desconto</Button>}
+              <Button variant="outline" onClick={() => setDlg(null)}>Cancelar</Button>
+              <Button
+                data-testid="ajuste-aplicar"
+                onClick={() => {
+                  if (ajusteForm.tipo === 'cupom') {
+                    if (!ajusteForm.codigo.trim()) { toast({ title: 'Digite o código do cupom', variant: 'destructive' }); return; }
+                    setAjuste({ tipo: 'cupom', codigo: ajusteForm.codigo.trim() });
+                  } else {
+                    if (!(numeroAjuste(ajusteForm.valor) > 0)) { toast({ title: 'Informe um valor maior que zero', variant: 'destructive' }); return; }
+                    if (ajusteForm.tipo === 'percentual' && numeroAjuste(ajusteForm.valor) > 100) { toast({ title: 'O percentual não pode passar de 100%', variant: 'destructive' }); return; }
+                    setAjuste({ tipo: ajusteForm.tipo, valor: ajusteForm.valor });
+                  }
+                  setDlg(null);
+                }}
+              >
+                Aplicar desconto
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
 
