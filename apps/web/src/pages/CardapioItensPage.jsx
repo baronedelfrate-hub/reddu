@@ -72,7 +72,7 @@ export default function CardapioItensPage() {
     disponibilidadeTodosDias: true, diasDisponiveis: [],
     limitarHorario: false, horarioInicio: '', horarioFim: '',
     comboPermiteAcima: false, quantidadeMaxima: '',
-    gruposAdicionaisIds: [],
+    gruposAdicionaisIds: [], somenteBalcao: false,
   });
   const [itemImageFile, setItemImageFile] = useState(null);
   const [itemDeleteTarget, setItemDeleteTarget] = useState(null);
@@ -376,7 +376,7 @@ export default function CardapioItensPage() {
       disponibilidadeTodosDias: true, diasDisponiveis: [],
       limitarHorario: false, horarioInicio: '', horarioFim: '',
       comboPermiteAcima: false, quantidadeMaxima: '',
-      gruposAdicionaisIds: [],
+      gruposAdicionaisIds: [], somenteBalcao: false,
     });
     setItemImageFile(null);
     setMultiAberto(false);
@@ -399,7 +399,7 @@ export default function CardapioItensPage() {
       horarioFim: item.horario_disponivel_fim ? item.horario_disponivel_fim.slice(0, 5) : '',
       comboPermiteAcima: !!item.combo_permite_acima,
       quantidadeMaxima: item.quantidade_maxima != null ? String(item.quantidade_maxima) : '',
-      gruposAdicionaisIds: [],
+      gruposAdicionaisIds: [], somenteBalcao: !!item.somente_balcao,
     });
     setItemImageFile(null);
     setMultiAberto(false);
@@ -549,6 +549,7 @@ export default function CardapioItensPage() {
         horario_disponivel_fim: itemForm.limitarHorario ? itemForm.horarioFim : null,
         combo_permite_acima: itemForm.isCombo && itemForm.comboModo === 'fechado' ? !!itemForm.comboPermiteAcima : false,
         quantidade_maxima: quantidadeMaximaNum,
+        somente_balcao: !!itemForm.somenteBalcao,
       };
 
       let cardapioItemId = editingItem?.id;
@@ -793,6 +794,7 @@ export default function CardapioItensPage() {
                           <div className="flex items-center gap-2">
                             <span className="font-medium text-gray-900 truncate">{item.nome}</span>
                             {!item.ativo && <Badge variant="outline" className="text-gray-400">Oculto</Badge>}
+                            {item.somente_balcao && <Badge variant="outline" className="text-emerald-700 border-emerald-300">Só balcão</Badge>}
                             {item.combo_quantidade_total != null ? (
                               <Badge variant="outline" className="text-violet-600 border-violet-300">
                                 Combo · {item.combo_permite_acima ? 'a partir de ' : ''}{item.combo_quantidade_total} un{item.quantidade_maxima ? ` · máx. ${item.quantidade_maxima}` : ''}
@@ -1313,6 +1315,14 @@ export default function CardapioItensPage() {
                   ? 'Dentro dos dias escolhidos acima, o item só aparece na vitrine nesse intervalo (aceita virar a noite, ex.: 18:00 até 02:00).'
                   : 'Sem limite de horário: aparece o dia todo.'}
               </p>
+            </div>
+
+            <div className="flex items-center justify-between border rounded-lg p-3" data-testid="item-somente-balcao">
+              <div className="pr-3">
+                <Label className="text-gray-900">Só no Pedidos Balcão</Label>
+                <p className="text-xs text-gray-400">Quando ligado, o item aparece só para a atendente em Pedidos Balcão. Não aparece no cardápio digital, nem para o robô de WhatsApp, e o cliente não consegue pedir por lá.</p>
+              </div>
+              <Switch checked={!!itemForm.somenteBalcao} onCheckedChange={(v) => setItemForm((f) => ({ ...f, somenteBalcao: v }))} />
             </div>
 
             <div>
