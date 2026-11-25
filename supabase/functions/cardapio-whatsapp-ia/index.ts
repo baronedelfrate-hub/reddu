@@ -99,6 +99,7 @@ async function montarContexto(serviceClient: any, empresa: any, telefoneJid: str
       .select('nome, descricao, preco, categoria_id, tipo, restricoes_alimentares, dias_disponiveis, horario_disponivel_inicio, horario_disponivel_fim')
       .eq('empresa_id', empresa.id)
       .eq('ativo', true)
+      .eq('somente_balcao', false) // itens só do Pedidos Balcão não são oferecidos ao cliente
       .order('ordem', { ascending: true })
       .limit(150),
     serviceClient.from('cardapio_categorias').select('id, nome').eq('empresa_id', empresa.id).eq('ativo', true),

@@ -1109,6 +1109,7 @@ export default function CardapioPublicoPage({ modoBalcao = false, slugOverride =
         .from('cardapio_itens')
         .select('*')
         .eq('empresa_id', empresaData.id)
+        .eq('somente_balcao', false) // itens só do Pedidos Balcão nunca aparecem no cardápio digital
         .order('ordem').order('nome');
       if (!mostrarEsgotados) itensQuery = itensQuery.eq('ativo', true);
       const { data: itens, error: itensErr } = await itensQuery;
