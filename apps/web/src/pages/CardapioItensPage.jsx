@@ -642,6 +642,9 @@ export default function CardapioItensPage() {
 
   // Atalho: define (ou remove) o estoque de reserva de TODOS os itens e sabores de uma vez.
   const localCentral = locais.find((l) => semAcento(l.nome).includes('central')) || null;
+  // Locais que podem ser usados como estoque de reserva do cardápio: o Central e o estoque da lojinha de bandejas.
+  const ehLocalReserva = (l) => { const n = semAcento(l.nome); return n.includes('central') || n.includes('bandejas - lojinha'); };
+  const locaisReserva = locais.filter(ehLocalReserva);
   const [reservaEmMassa, setReservaEmMassa] = useState('');
   const [aplicandoReserva, setAplicandoReserva] = useState(false);
   const reservaEscolhida = reservaEmMassa || localCentral?.id || '';
@@ -713,7 +716,7 @@ export default function CardapioItensPage() {
                 onChange={(e) => setReservaEmMassa(e.target.value)}
               >
                 <option value="">Escolha o local</option>
-                {locais.filter((l) => !localCentral || l.id === localCentral.id).map((l) => <option key={l.id} value={l.id}>{l.nome}</option>)}
+                {(locaisReserva.length > 0 ? locaisReserva : locais).map((l) => <option key={l.id} value={l.id}>{l.nome}</option>)}
               </select>
             </div>
             <Button size="sm" disabled={!reservaEscolhida || aplicandoReserva} onClick={() => aplicarReservaEmMassa(reservaEscolhida)}>
@@ -950,7 +953,7 @@ export default function CardapioItensPage() {
                 <option value="">Sem reserva</option>
                 {locais
                   .filter((l) => l.id !== itemForm.local_id)
-                  .filter((l) => !localCentral || l.id === localCentral.id || l.id === itemForm.local_reserva_id)
+                  .filter((l) => locaisReserva.length === 0 || ehLocalReserva(l) || l.id === itemForm.local_reserva_id)
                   .map((l) => <option key={l.id} value={l.id}>{l.nome}</option>)}
               </select>
               <p className="text-xs text-gray-400 mt-1">
