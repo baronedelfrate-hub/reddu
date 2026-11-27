@@ -470,16 +470,17 @@ export default function CobrancasPage({ abaInicial = 'cobrancas' }) {
                 <>
                   <DialogHeader><DialogTitle>{dlgCliente.id ? 'Editar cliente' : 'Novo cliente'}</DialogTitle><DialogDescription>Cadastro usado na NF-e e nos boletos. Digite o CNPJ que os dados são preenchidos pela Receita.</DialogDescription></DialogHeader>
                   <div className="space-y-3">
-                    {campo('Razão social ou nome', 'cl-razao', f.razao_social, set('razao_social'), { props: { 'data-testid': 'cli-razao' } })}
-                    {campo('Nome fantasia (opcional)', 'cl-fant', f.nome_fantasia, set('nome_fantasia'))}
                     <div className="flex items-end gap-2">
-                      {campo('CNPJ ou CPF', 'cl-doc', formatarDocumento(f.documento), onDoc, { className: 'flex-1', props: { inputMode: 'numeric', placeholder: '00.000.000/0000-00', 'data-testid': 'cli-doc' } })}
+                      {campo('CNPJ ou CPF', 'cl-doc', formatarDocumento(f.documento), onDoc, { className: 'flex-1', props: { inputMode: 'numeric', placeholder: '00.000.000/0000-00', 'data-testid': 'cli-doc', autoFocus: !dlgCliente.id } })}
                       {soDigitos(f.documento).length === 14 && cnpjValido(f.documento) && (
                         <Button type="button" variant="outline" size="sm" className="h-9 gap-1.5" disabled={buscandoCnpj} onClick={() => buscarDadosCnpj(soDigitos(f.documento), true)} data-testid="btn-buscar-cnpj">
                           {buscandoCnpj ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />} Buscar dados
                         </Button>
                       )}
                     </div>
+                    {campo('Razão social ou nome', 'cl-razao', f.razao_social, set('razao_social'), { props: { 'data-testid': 'cli-razao' } })}
+                    {campo('Nome fantasia (opcional)', 'cl-fant', f.nome_fantasia, set('nome_fantasia'))}
+                    
                     <div className="grid grid-cols-2 gap-3">{campo('E-mail', 'cl-email', f.email, set('email'))}{campo('Telefone', 'cl-tel', f.telefone, set('telefone'))}</div>
                     <div className="grid grid-cols-3 gap-3">{campo(buscandoCep ? 'CEP (buscando...)' : 'CEP', 'cl-cep', formatarCep(f.cep), onCep, { props: { inputMode: 'numeric', placeholder: '00000-000', 'data-testid': 'cli-cep' } })}{campo('Município', 'cl-mun', f.municipio, set('municipio'), { className: 'col-span-1' })}{campo('UF', 'cl-uf', f.uf, (v) => set('uf')(v.slice(0, 2)))}</div>
                     <div className="grid grid-cols-3 gap-3">{campo('Rua', 'cl-rua', f.logradouro, set('logradouro'), { className: 'col-span-2' })}{campo('Número', 'cl-num', f.numero, set('numero'))}</div>
