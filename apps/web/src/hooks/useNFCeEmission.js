@@ -29,15 +29,15 @@ export function useNFCeEmission() {
       if (result.success) {
         setStatus('success');
         toast({
-          title: 'NFC-e Emitida',
-          description: 'A nota fiscal foi gerada com sucesso.',
+          title: result.modelo === '55' ? 'NF-e Emitida' : 'NFC-e Emitida',
+          description: result.modelo === '55' ? 'Cliente com CNPJ: foi emitida NF-e (modelo 55) com sucesso.' : 'A nota fiscal foi gerada com sucesso.',
           className: 'bg-emerald-600 text-white border-none'
         });
       } else {
         setStatus('error');
         setError(result.erro);
         toast({
-          title: 'Erro na Emissão NFC-e',
+          title: result.modelo === '55' ? 'Erro na Emissão NF-e' : 'Erro na Emissão NFC-e',
           description: result.erro || 'Falha ao processar nota fiscal.',
           variant: 'destructive'
         });
