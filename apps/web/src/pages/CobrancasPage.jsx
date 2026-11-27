@@ -7,10 +7,11 @@ import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { consultarCnpj } from '@/utils/cnpj';
 import { buscarCep, formatarCep, soDigitosCep } from '@/utils/cep';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Wallet, Plus, Loader2, Search, Download, Copy, ExternalLink, CheckCircle2, XCircle, Pencil, Users, Trash2 } from 'lucide-react';
-import { documentoValido, formatarDocumento, soDigitos } from '@/utils/documentos';
+import { cnpjValido, documentoValido, formatarDocumento, soDigitos } from '@/utils/documentos';
 
 // Cobranças a clientes empresa (boletos). Primeira versão MANUAL: o boleto é emitido no internet banking e
 // aqui se registra e acompanha (vencimento, pagamento). As colunas provedor/provedor_id ficam prontas para
@@ -42,6 +43,7 @@ export default function CobrancasPage({ abaInicial = 'cobrancas' }) {
   const { toast } = useToast();
   const [aba, setAba] = useState(abaInicial);
   const [buscandoCep, setBuscandoCep] = useState(false);
+  const [buscandoCnpj, setBuscandoCnpj] = useState(false);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState('');
   const [clientes, setClientes] = useState([]);
@@ -426,6 +428,31 @@ export default function CobrancasPage({ abaInicial = 'cobrancas' }) {
             {dlgCliente && (() => {
               const f = dlgCliente.form;
               const set = (k) => (v) => setDlgCliente((d) => ({ ...d, form: { ...d.form, [k]: v } }));
+              // CNPJ completo e válido: busca razão social e endereço na Receita (via BrasilAPI).
+              // Automático só preenche campos vazios; o botão "Buscar dados" sobrescreve.
+              const buscarDadosCnpj = async (doc, sobrescrever) => {
+                setBuscandoCnpj(true);
+                const r = await consultarCnpj(doc);
+                setBuscandoCnpj(false);
+                if (!r.ok) {
+                  toast({ title: r.motivo === 'nao_encontrado' ? 'CNPJ não encontrado na Receita' : 'Não foi possível consultar o CNPJ agora', description: 'Preencha os dados manualmente.' });
+                  return;
+                }
+                setDlgCliente((dd) => {
+                  if (!dd || soDigitos(dd.form.documento) !== doc) return dd;
+                  const novo = { ...dd.form };
+                  for (const [k, v] of Object.entries(r.dados)) if (v && (sobrescrever || !String(novo[k] ?? '').trim())) novo[k] = v;
+                  return { ...dd, form: novo };
+                });
+                if (r.situacao && !/^ativa$/i.test(r.situacao)) toast({ title: `Situação do CNPJ na Receita: ${r.situacao}`, description: 'Confirme com o cliente antes de emitir nota.', variant: 'destructive' });
+                else toast({ title: 'Dados preenchidos pela Receita', description: 'Confira e complete número, complemento, e-mail e telefone se precisar.' });
+              };
+              const onDoc = (v) => {
+                const d = soDigitos(v).slice(0, 14);
+                set('documento')(d);
+                if (d.length === 14 && cnpjValido(d) && !dlgCliente.id) buscarDadosCnpj(d, false);
+              };
+
               // Ao completar os 8 dígitos do CEP, preenche rua, bairro, município e UF (número e complemento ficam por conta do usuário).
               const onCep = async (v) => {
                 const d = soDigitosCep(v);
@@ -441,11 +468,18 @@ export default function CobrancasPage({ abaInicial = 'cobrancas' }) {
               };
               return (
                 <>
-                  <DialogHeader><DialogTitle>{dlgCliente.id ? 'Editar cliente' : 'Novo cliente'}</DialogTitle><DialogDescription>Dados que a Sicredi exige do pagador do boleto.</DialogDescription></DialogHeader>
+                  <DialogHeader><DialogTitle>{dlgCliente.id ? 'Editar cliente' : 'Novo cliente'}</DialogTitle><DialogDescription>Cadastro usado na NF-e e nos boletos. Digite o CNPJ que os dados são preenchidos pela Receita.</DialogDescription></DialogHeader>
                   <div className="space-y-3">
                     {campo('Razão social ou nome', 'cl-razao', f.razao_social, set('razao_social'), { props: { 'data-testid': 'cli-razao' } })}
                     {campo('Nome fantasia (opcional)', 'cl-fant', f.nome_fantasia, set('nome_fantasia'))}
-                    {campo('CNPJ ou CPF', 'cl-doc', formatarDocumento(f.documento), (v) => set('documento')(soDigitos(v).slice(0, 14)), { props: { inputMode: 'numeric', placeholder: '00.000.000/0000-00', 'data-testid': 'cli-doc' } })}
+                    <div className="flex items-end gap-2">
+                      {campo('CNPJ ou CPF', 'cl-doc', formatarDocumento(f.documento), onDoc, { className: 'flex-1', props: { inputMode: 'numeric', placeholder: '00.000.000/0000-00', 'data-testid': 'cli-doc' } })}
+                      {soDigitos(f.documento).length === 14 && cnpjValido(f.documento) && (
+                        <Button type="button" variant="outline" size="sm" className="h-9 gap-1.5" disabled={buscandoCnpj} onClick={() => buscarDadosCnpj(soDigitos(f.documento), true)} data-testid="btn-buscar-cnpj">
+                          {buscandoCnpj ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />} Buscar dados
+                        </Button>
+                      )}
+                    </div>
                     <div className="grid grid-cols-2 gap-3">{campo('E-mail', 'cl-email', f.email, set('email'))}{campo('Telefone', 'cl-tel', f.telefone, set('telefone'))}</div>
                     <div className="grid grid-cols-3 gap-3">{campo(buscandoCep ? 'CEP (buscando...)' : 'CEP', 'cl-cep', formatarCep(f.cep), onCep, { props: { inputMode: 'numeric', placeholder: '00000-000', 'data-testid': 'cli-cep' } })}{campo('Município', 'cl-mun', f.municipio, set('municipio'), { className: 'col-span-1' })}{campo('UF', 'cl-uf', f.uf, (v) => set('uf')(v.slice(0, 2)))}</div>
                     <div className="grid grid-cols-3 gap-3">{campo('Rua', 'cl-rua', f.logradouro, set('logradouro'), { className: 'col-span-2' })}{campo('Número', 'cl-num', f.numero, set('numero'))}</div>
