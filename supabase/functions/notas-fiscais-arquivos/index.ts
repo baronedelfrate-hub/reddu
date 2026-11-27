@@ -10,6 +10,7 @@
 //     caminho começa com "/" — nunca um endereço completo vindo da resposta.
 //
 // Ações (body: { action, ... }):
+//   cancelar  { fonte, id, justificativa (15 a 255 caracteres) }  só administrador; cancela na SEFAZ via Focus e marca como 'cancelado' -> { protocolo }
 //   xml       { fonte: 'vendas'|'reabastecimento'|'consignado', id }          -> { nome, xml }
 //   zip       { de, ate, origem? }  (datas YYYY-MM-DD; origem opcional)       -> { nome, base64, incluidas, falhas }
 //   completar { limite?, ignorar? }  notas emitidas sem chave/link: busca na Focus e grava -> { atualizadas, restantes, falhas }
@@ -60,7 +61,12 @@ const chaveLimpa = (v: unknown) => soDigitos(v).slice(0, 44);
 type Focus = { base: string; auth: string };
 
 // Endereço base da Focus (origem) + cabeçalho de autenticação, validando o host.
-function configurarFocus(urlApi: string, token: string): { focus: Focus; urlNota: (ref: string) => string } {
+// A chave de acesso tem o modelo nas posições 21-22: 55 = NF-e (endereço /v2/nfe), 65 = NFC-e (/v2/nfce).
+const modeloDaChave = (chave: unknown) => chaveLimpa(chave).slice(20, 22);
+
+type UrlNota = (ref: string, chave?: unknown) => string;
+
+function configurarFocus(urlApi: string, token: string): { focus: Focus; urlNota: UrlNota } {
   let u: URL;
   try { u = new URL(String(urlApi)); } catch { throw new ErroHttp(400, 'URL da API Focus inválida nas configurações fiscais.'); }
   if (u.protocol !== 'https:' || !HOSTS_FOCUS.includes(u.hostname)) {
@@ -70,7 +76,9 @@ function configurarFocus(urlApi: string, token: string): { focus: Focus; urlNota
   const caminho = u.pathname.replace(/\/+$/, '');
   return {
     focus: { base, auth: `Basic ${btoa(`${token}:`)}` },
-    urlNota: (ref: string) => `${base}${caminho}/${encodeURIComponent(ref)}`,
+    urlNota: (ref: string, chave?: unknown) => (modeloDaChave(chave) === '55'
+      ? `${base}/v2/nfe/${encodeURIComponent(ref)}`
+      : `${base}${caminho}/${encodeURIComponent(ref)}`),
   };
 }
 
@@ -78,8 +86,8 @@ async function chamarFocus(url: string, focus: Focus): Promise<Response> {
   return await fetch(url, { headers: { Authorization: focus.auth }, signal: AbortSignal.timeout(TEMPO_CHAMADA_MS) });
 }
 
-async function consultarNota(urlNota: (ref: string) => string, focus: Focus, ref: string) {
-  const resp = await chamarFocus(urlNota(ref), focus);
+async function consultarNota(urlNota: UrlNota, focus: Focus, ref: string, chave?: unknown) {
+  const resp = await chamarFocus(urlNota(ref, chave), focus);
   const dados = await resp.json().catch(() => ({}));
   if (!resp.ok) throw new Error(dados?.mensagem || dados?.codigo || `A Focus respondeu ${resp.status}.`);
   return dados;
@@ -93,8 +101,8 @@ async function baixarXml(focus: Focus, caminho: string): Promise<string> {
 }
 
 // Nota autorizada → { chave, xml, linkDanfe }
-async function xmlDaNota(urlNota: (ref: string) => string, focus: Focus, ref: string) {
-  const dados = await consultarNota(urlNota, focus, ref);
+async function xmlDaNota(urlNota: UrlNota, focus: Focus, ref: string, chaveConhecida?: unknown) {
+  const dados = await consultarNota(urlNota, focus, ref, chaveConhecida);
   if (dados.status && dados.status !== 'autorizado') throw new Error(`Nota com status "${dados.status}" na Focus.`);
   const xml = await baixarXml(focus, dados.caminho_xml_nota_fiscal);
   return { chave: chaveLimpa(dados.chave_nfe || dados.chave), xml, dados };
@@ -161,12 +169,12 @@ function paraBase64(bytes: Uint8Array): string {
 }
 
 // Baixa os XMLs das notas e monta o ZIP.
-async function montarZipXml(notas: NotaRef[], urlNota: (ref: string) => string, focus: Focus) {
+async function montarZipXml(notas: NotaRef[], urlNota: UrlNota, focus: Focus) {
   const arquivos: Record<string, Uint8Array> = {};
   const falhas: { descricao: string; motivo: string }[] = [];
   await comConcorrencia(notas, CONCORRENCIA, async (n) => {
     try {
-      const { chave, xml } = await xmlDaNota(urlNota, focus, n.ref);
+      const { chave, xml } = await xmlDaNota(urlNota, focus, n.ref, n.chave);
       let nome = `${chave || chaveLimpa(n.chave) || n.ref}.xml`;
       if (arquivos[nome]) nome = `${n.ref}-${nome}`;
       arquivos[nome] = strToU8(xml);
@@ -293,6 +301,7 @@ async function tratar(req: Request) {
 
   let empresaId: string;
   let usuarioId: string | null = null;
+  let ehAdmin = false;
   if (ehServico) {
     if (action !== 'enviar_escritorio' || !/^[0-9a-f-]{36}$/i.test(String(corpo?.empresa_id || ''))) {
       throw new ErroHttp(403, 'Chamada de serviço só pode enviar o mês de uma empresa.');
@@ -305,10 +314,11 @@ async function tratar(req: Request) {
     const { data: userData, error: userError } = await userClient.auth.getUser(jwt);
     if (userError || !userData?.user) throw new ErroHttp(401, 'Sessão inválida. Entre novamente.');
 
-    const { data: usuarioRow } = await userClient.from('usuarios').select('empresa_id').eq('id', userData.user.id).maybeSingle();
+    const { data: usuarioRow } = await userClient.from('usuarios').select('empresa_id, perfil').eq('id', userData.user.id).maybeSingle();
     if (!usuarioRow?.empresa_id) throw new ErroHttp(403, 'Usuário sem empresa vinculada.');
     empresaId = usuarioRow.empresa_id;
     usuarioId = userData.user.id;
+    ehAdmin = usuarioRow.perfil === 'admin';
   }
 
   const service = createClient(supabaseUrl, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
@@ -316,13 +326,52 @@ async function tratar(req: Request) {
   if (!cfg?.token_api_focus || !cfg?.url_api_focus) throw new ErroHttp(400, 'Token ou URL da Focus NFe não configurados nas configurações fiscais.');
   const { focus, urlNota } = configurarFocus(cfg.url_api_focus, cfg.token_api_focus);
 
+  // ----- cancelamento de uma nota (só administrador) -----
+  if (action === 'cancelar') {
+    if (!ehAdmin) throw new ErroHttp(403, 'Só o administrador pode cancelar notas fiscais.');
+    const fonte = corpo?.fonte as Fonte;
+    if (!['vendas', 'reabastecimento', 'consignado'].includes(fonte) || !corpo?.id) throw new ErroHttp(400, 'Informe fonte e id da nota.');
+    const justificativa = String(corpo?.justificativa ?? '').trim().replace(/\s+/g, ' ');
+    if (justificativa.length < 15 || justificativa.length > 255) throw new ErroHttp(400, 'A justificativa precisa ter de 15 a 255 caracteres.');
+
+    const nota = await notaPorId(service, empresaId, fonte, String(corpo.id));
+    let resp: Response;
+    try {
+      resp = await fetch(urlNota(nota.ref, nota.chave), {
+        method: 'DELETE',
+        headers: { Authorization: focus.auth, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ justificativa }),
+        signal: AbortSignal.timeout(30000),
+      });
+    } catch (e) {
+      throw new ErroHttp(502, `A Focus não respondeu ao cancelamento: ${(e as Error).message}`);
+    }
+    const dados = await resp.json().catch(() => ({}));
+    if (!resp.ok || dados?.status !== 'cancelado') {
+      const motivo = dados?.mensagem_sefaz
+        ? `SEFAZ ${dados.status_sefaz || ''}: ${dados.mensagem_sefaz}`.replace('  ', ' ')
+        : (dados?.mensagem || dados?.codigo || `A Focus respondeu ${resp.status}.`);
+      throw new ErroHttp(422, `Não foi possível cancelar a nota. ${motivo}`);
+    }
+
+    const protocolo = String(dados?.numero_protocolo || '');
+    const hoje = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+    const msg = `Nota cancelada em ${hoje}${protocolo ? ` (protocolo ${protocolo})` : ''}: ${justificativa}`.slice(0, 500);
+    const tabela = fonte === 'vendas' ? 'vendas' : fonte === 'reabastecimento' ? 'pedidos_reabastecimento_mercados' : 'pedidos_consignado_mercados';
+    // Nota combinada (vários mercados na mesma nota): todos os mercados dela ficam cancelados.
+    const filtroNota = fonte === 'vendas' ? { col: 'id', val: nota.id } : { col: 'nfe_id', val: nota.ref };
+    const { error: updError } = await service.from(tabela).update({ status_fiscal: 'cancelado', nfe_erro_mensagem: msg }).eq(filtroNota.col, filtroNota.val);
+    if (updError) throw new ErroHttp(500, `A nota foi cancelada na SEFAZ, mas não consegui atualizar o sistema: ${updError.message}`);
+    return jsonResponse({ ok: true, protocolo, mensagem: msg });
+  }
+
   // ----- XML de uma nota -----
   if (action === 'xml') {
     const fonte = corpo?.fonte as Fonte;
     if (!['vendas', 'reabastecimento', 'consignado'].includes(fonte) || !corpo?.id) throw new ErroHttp(400, 'Informe fonte e id da nota.');
     const nota = await notaPorId(service, empresaId, fonte, String(corpo.id));
     try {
-      const { chave, xml } = await xmlDaNota(urlNota, focus, nota.ref);
+      const { chave, xml } = await xmlDaNota(urlNota, focus, nota.ref, nota.chave);
       return jsonResponse({ ok: true, nome: `${chave || chaveLimpa(nota.chave) || nota.ref}.xml`, xml });
     } catch (e) {
       throw new ErroHttp(502, `Não foi possível obter o XML: ${(e as Error).message}`);
