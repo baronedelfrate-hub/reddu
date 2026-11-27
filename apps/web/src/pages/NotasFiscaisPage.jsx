@@ -8,7 +8,8 @@ import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, FileCheck, Search, Download, Copy, ExternalLink, AlertTriangle, RefreshCw, FileCode, Archive, Wrench } from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Loader2, FileCheck, Search, Download, Copy, ExternalLink, AlertTriangle, RefreshCw, FileCode, Archive, Wrench, Ban } from 'lucide-react';
 
 // Consulta das notas fiscais emitidas (e das que deram erro), reunindo todas as origens:
 // vendas (PDV, balcão, cardápio...), Faturamento de Reabastecimento e Pedido Consignado.
@@ -65,7 +66,9 @@ const chamarArquivos = async (body) => {
   return data;
 };
 
-const normStatus = (s) => (s === 'emitido' || s === 'success' ? 'emitido' : 'erro');
+const normStatus = (s) => (s === 'emitido' || s === 'success' ? 'emitido' : s === 'cancelado' ? 'cancelado' : 'erro');
+// Modelo da nota pela chave de acesso (posições 21-22): 55 = NF-e, 65 = NFC-e.
+const modeloNota = (chave) => ({ 55: 'NF-e', 65: 'NFC-e' }[String(chave || '').slice(20, 22)] || null);
 
 // Junta as linhas de mercado que compartilham a mesma nota (nota combinada) numa linha só.
 const agruparPorChave = (linhas) => {
@@ -83,7 +86,7 @@ const agruparPorChave = (linhas) => {
 };
 
 export default function NotasFiscaisPage() {
-  const { empresaId } = useAuth();
+  const { empresaId, isAdmin } = useAuth();
   const { toast } = useToast();
 
   const [loading, setLoading] = useState(true);
@@ -98,6 +101,7 @@ export default function NotasFiscaisPage() {
   const [baixandoId, setBaixandoId] = useState(null);
   const [baixandoZip, setBaixandoZip] = useState(false);
   const [completando, setCompletando] = useState(false);
+  const [cancelando, setCancelando] = useState(null); // { nota, justificativa, enviando }
 
   const carregar = useCallback(async () => {
     if (!empresaId) { setLoading(false); return; }
@@ -105,7 +109,7 @@ export default function NotasFiscaisPage() {
     try {
       const ini = `${de}T00:00:00`;
       const fim = `${ate}T23:59:59`;
-      const status = ['emitido', 'erro'];
+      const status = ['emitido', 'erro', 'cancelado'];
 
       const [vendasRes, reabRes, consRes] = await Promise.all([
         supabase.from('vendas')
@@ -180,6 +184,20 @@ export default function NotasFiscaisPage() {
     };
   }, [filtradas]);
 
+  const confirmarCancelamento = async () => {
+    const { nota, justificativa } = cancelando;
+    setCancelando((c) => ({ ...c, enviando: true }));
+    try {
+      const r = await chamarArquivos({ action: 'cancelar', fonte: nota.fonte, id: nota.fonteId, justificativa });
+      toast({ title: 'Nota cancelada', description: r.protocolo ? `Protocolo de cancelamento ${r.protocolo}.` : undefined });
+      setCancelando(null);
+      await carregar();
+    } catch (e) {
+      toast({ title: 'Não foi possível cancelar a nota', description: e.message, variant: 'destructive' });
+      setCancelando((c) => (c ? { ...c, enviando: false } : c));
+    }
+  };
+
   const copiarChave = async (chave) => {
     try {
       await navigator.clipboard.writeText(String(chave));
@@ -252,7 +270,7 @@ export default function NotasFiscaisPage() {
       ['Data', 'Origem', 'Cliente / Mercado', 'Valor', 'CPF/CNPJ', 'Situação', 'Chave de acesso', 'Link do PDF'],
       ...filtradas.map((n) => [
         fmtData(n.data), rotuloOrigem(n.origem), n.descricao, (Number(n.valor) || 0).toFixed(2).replace('.', ','),
-        fmtDoc(n.doc) === '—' ? '' : fmtDoc(n.doc), n.status === 'emitido' ? 'Emitida' : 'Com erro', n.chave || '', n.pdf || '',
+        fmtDoc(n.doc) === '—' ? '' : fmtDoc(n.doc), n.status === 'emitido' ? 'Emitida' : n.status === 'cancelado' ? 'Cancelada' : 'Com erro', n.chave || '', n.pdf || '',
       ]),
     ];
     const csv = `﻿${linhas.map((l) => l.map(aspas).join(';')).join('\r\n')}`;
@@ -311,6 +329,7 @@ export default function NotasFiscaisPage() {
             <select id="nf-situacao" className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm" value={situacao} onChange={(e) => setSituacao(e.target.value)}>
               <option value="emitido">Emitidas</option>
               <option value="erro">Com erro</option>
+              <option value="cancelado">Canceladas</option>
               <option value="todas">Todas</option>
             </select>
           </div>
@@ -378,14 +397,16 @@ export default function NotasFiscaisPage() {
                     <td className="px-3 py-2 whitespace-nowrap text-gray-700">{rotuloOrigem(n.origem)}</td>
                     <td className="px-3 py-2 text-gray-900 max-w-[320px]">
                       <span className="font-medium">{n.descricao}</span>
-                      {n.chave && <p className="text-[11px] text-gray-400 font-mono truncate" title={n.chave}>{n.chave}</p>}
+                      {n.chave && <p className="text-[11px] text-gray-400 font-mono truncate" title={n.chave}>{modeloNota(n.chave) && <span className="font-sans font-semibold text-gray-500 mr-1">{modeloNota(n.chave)}</span>}{n.chave}</p>}
                     </td>
                     <td className="px-3 py-2 text-right font-semibold text-gray-900 whitespace-nowrap">{fmtMoeda(n.valor)}</td>
                     <td className="px-3 py-2 text-gray-600 whitespace-nowrap hidden lg:table-cell">{fmtDoc(n.doc)}</td>
                     <td className="px-3 py-2 text-center">
                       {n.status === 'emitido'
                         ? <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Emitida</span>
-                        : <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700 cursor-help" title={n.erro || 'Erro na emissão'}>Com erro</span>}
+                        : n.status === 'cancelado'
+                          ? <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-200 text-gray-600 cursor-help" title={n.erro || 'Nota cancelada'} data-testid="situacao-cancelada">Cancelada</span>
+                          : <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700 cursor-help" title={n.erro || 'Erro na emissão'}>Com erro</span>}
                     </td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
                       {n.status === 'emitido' ? (
@@ -403,7 +424,14 @@ export default function NotasFiscaisPage() {
                               <Copy className="h-3.5 w-3.5" /> Chave
                             </Button>
                           )}
+                          {isAdmin() && (
+                            <Button size="sm" variant="outline" className="h-8 gap-1 text-red-600 hover:text-red-700" onClick={() => setCancelando({ nota: n, justificativa: '', enviando: false })} aria-label="Cancelar nota" data-testid="btn-cancelar-nota">
+                              <Ban className="h-3.5 w-3.5" /> Cancelar
+                            </Button>
+                          )}
                         </div>
+                      ) : n.status === 'cancelado' ? (
+                        <span className="text-xs text-gray-500 max-w-[260px] inline-block truncate align-middle" title={n.erro || ''}>{n.erro || 'Nota cancelada'}</span>
                       ) : (
                         <span className="text-xs text-red-600 max-w-[260px] inline-block truncate align-middle" title={n.erro || ''}>{n.erro || 'Erro na emissão'}</span>
                       )}
@@ -415,6 +443,38 @@ export default function NotasFiscaisPage() {
           )}
         </div>
       </div>
+
+      <Dialog open={!!cancelando} onOpenChange={(o) => { if (!o && !cancelando?.enviando) setCancelando(null); }}>
+        <DialogContent>
+          {cancelando && (() => {
+            const { nota, justificativa, enviando } = cancelando;
+            const tam = justificativa.trim().length;
+            const valida = tam >= 15 && tam <= 255;
+            return (
+              <>
+                <DialogHeader>
+                  <DialogTitle>Cancelar {modeloNota(nota.chave) || 'nota fiscal'}</DialogTitle>
+                  <DialogDescription>
+                    {nota.descricao} — {fmtMoeda(nota.valor)}. O cancelamento é registrado na SEFAZ e não tem volta. A SEFAZ só aceita dentro do prazo (em geral 24 horas para NF-e; para NFC-e o prazo pode ser menor).
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-2">
+                  <Label htmlFor="nf-justificativa" className="text-gray-900 text-xs">Justificativa (de 15 a 255 caracteres)</Label>
+                  <Input id="nf-justificativa" value={justificativa} onChange={(e) => setCancelando((c) => ({ ...c, justificativa: e.target.value }))} placeholder="Ex.: Nota emitida por engano, venda não concluída" disabled={enviando} data-testid="nf-justificativa" />
+                  <p className={`text-xs ${valida || tam === 0 ? 'text-gray-400' : 'text-red-600'}`}>{tam} caractere(s){tam > 0 && tam < 15 ? ` — faltam ${15 - tam}` : ''}</p>
+                  <p className="text-xs text-gray-500">Depois de cancelar, o estoque e o financeiro da venda não são alterados automaticamente.</p>
+                </div>
+                <DialogFooter className="gap-2">
+                  <Button variant="outline" onClick={() => setCancelando(null)} disabled={enviando}>Voltar</Button>
+                  <Button variant="destructive" onClick={confirmarCancelamento} disabled={!valida || enviando} data-testid="btn-confirmar-cancelamento">
+                    {enviando ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Cancelar nota'}
+                  </Button>
+                </DialogFooter>
+              </>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }
