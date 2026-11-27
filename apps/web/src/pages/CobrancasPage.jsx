@@ -7,6 +7,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { buscarCep, formatarCep, soDigitosCep } from '@/utils/cep';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Wallet, Plus, Loader2, Search, Download, Copy, ExternalLink, CheckCircle2, XCircle, Pencil, Users, Trash2 } from 'lucide-react';
 import { documentoValido, formatarDocumento, soDigitos } from '@/utils/documentos';
@@ -36,10 +37,11 @@ const situacaoDe = (c, hoje) => {
   return { chave: 'aberta', rotulo: `Vence em ${-d} dia${-d > 1 ? 's' : ''}`, cls: 'bg-blue-100 text-blue-700' };
 };
 
-export default function CobrancasPage() {
+export default function CobrancasPage({ abaInicial = 'cobrancas' }) {
   const { empresaId, user } = useAuth();
   const { toast } = useToast();
-  const [aba, setAba] = useState('cobrancas');
+  const [aba, setAba] = useState(abaInicial);
+  const [buscandoCep, setBuscandoCep] = useState(false);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState('');
   const [clientes, setClientes] = useState([]);
@@ -424,6 +426,19 @@ export default function CobrancasPage() {
             {dlgCliente && (() => {
               const f = dlgCliente.form;
               const set = (k) => (v) => setDlgCliente((d) => ({ ...d, form: { ...d.form, [k]: v } }));
+              // Ao completar os 8 dígitos do CEP, preenche rua, bairro, município e UF (número e complemento ficam por conta do usuário).
+              const onCep = async (v) => {
+                const d = soDigitosCep(v);
+                set('cep')(d);
+                if (d.length !== 8) return;
+                setBuscandoCep(true);
+                const r = await buscarCep(d);
+                setBuscandoCep(false);
+                if (!r) { toast({ title: 'CEP não encontrado', description: 'Confira o CEP ou preencha o endereço manualmente.' }); return; }
+                setDlgCliente((dd) => (dd && soDigitosCep(dd.form.cep) === d
+                  ? { ...dd, form: { ...dd.form, ...Object.fromEntries(Object.entries(r).filter(([, val]) => val)) } }
+                  : dd));
+              };
               return (
                 <>
                   <DialogHeader><DialogTitle>{dlgCliente.id ? 'Editar cliente' : 'Novo cliente'}</DialogTitle><DialogDescription>Dados que a Sicredi exige do pagador do boleto.</DialogDescription></DialogHeader>
@@ -432,7 +447,7 @@ export default function CobrancasPage() {
                     {campo('Nome fantasia (opcional)', 'cl-fant', f.nome_fantasia, set('nome_fantasia'))}
                     {campo('CNPJ ou CPF', 'cl-doc', formatarDocumento(f.documento), (v) => set('documento')(soDigitos(v).slice(0, 14)), { props: { inputMode: 'numeric', placeholder: '00.000.000/0000-00', 'data-testid': 'cli-doc' } })}
                     <div className="grid grid-cols-2 gap-3">{campo('E-mail', 'cl-email', f.email, set('email'))}{campo('Telefone', 'cl-tel', f.telefone, set('telefone'))}</div>
-                    <div className="grid grid-cols-3 gap-3">{campo('CEP', 'cl-cep', f.cep, set('cep'))}{campo('Município', 'cl-mun', f.municipio, set('municipio'), { className: 'col-span-1' })}{campo('UF', 'cl-uf', f.uf, (v) => set('uf')(v.slice(0, 2)))}</div>
+                    <div className="grid grid-cols-3 gap-3">{campo(buscandoCep ? 'CEP (buscando...)' : 'CEP', 'cl-cep', formatarCep(f.cep), onCep, { props: { inputMode: 'numeric', placeholder: '00000-000', 'data-testid': 'cli-cep' } })}{campo('Município', 'cl-mun', f.municipio, set('municipio'), { className: 'col-span-1' })}{campo('UF', 'cl-uf', f.uf, (v) => set('uf')(v.slice(0, 2)))}</div>
                     <div className="grid grid-cols-3 gap-3">{campo('Rua', 'cl-rua', f.logradouro, set('logradouro'), { className: 'col-span-2' })}{campo('Número', 'cl-num', f.numero, set('numero'))}</div>
                     <div className="grid grid-cols-2 gap-3">{campo('Complemento', 'cl-comp', f.complemento, set('complemento'))}{campo('Bairro', 'cl-bairro', f.bairro, set('bairro'))}</div>
                     {campo('Observação', 'cl-obs', f.observacao, set('observacao'))}
