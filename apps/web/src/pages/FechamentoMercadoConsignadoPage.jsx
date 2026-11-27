@@ -19,6 +19,7 @@ import CPFNaNotaInput from '@/components/fiscal/CPFNaNotaInput';
 import NFCeStatusBadge from '@/components/fiscal/NFCeStatusBadge';
 import { Input } from '@/components/ui/input';
 import { validateNFcePayload } from '@/utils/validateNFcePayload';
+import { avisarCnpjSemCadastro } from '@/utils/avisoCnpj';
 
 // ─── Serviço de emissão de NF do Pedido Consignado ─────────────────────────
 // Mesmo princípio já validado no Faturamento de Reabastecimento — só que
@@ -216,6 +217,8 @@ const fiscalConsignadoService = {
         throw new Error(`Falha na validação do Payload:\n${validation.errors.join('\n')}`);
       }
 
+      avisarCnpjSemCadastro(docLimpo, empresaId);
+
       const { data, error } = await supabase.functions.invoke('emit-nfce', {
         body: {
           venda_id: pedidoMercado.id,
@@ -280,6 +283,8 @@ const fiscalConsignadoService = {
       }
 
       const refCombinada = 'combo-' + idsMercados.map((id) => id.split('-')[0]).join('-');
+
+      avisarCnpjSemCadastro(docLimpo, empresaId);
 
       const { data, error } = await supabase.functions.invoke('emit-nfce', {
         body: {
