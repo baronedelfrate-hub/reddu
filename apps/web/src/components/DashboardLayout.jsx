@@ -493,6 +493,7 @@ export default function DashboardLayout({ children }) {
       items: [
         { name: 'Notas Fiscais', href: '/dashboard/notas-fiscais', icon: FileCheck },
         { name: 'Notas de Compra', href: '/dashboard/notas-compra', icon: ShoppingCart },
+        { name: 'Clientes Fiscais (CNPJ/CPF)', href: '/dashboard/clientes-fiscais', icon: Users },
         { name: 'Cobranças (Boletos)', href: '/dashboard/cobrancas', icon: Wallet },
         { name: 'Config. Fiscais', href: '/configuracoes-fiscais', icon: Settings2 },
       ]

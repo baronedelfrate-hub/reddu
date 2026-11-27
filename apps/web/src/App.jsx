@@ -221,7 +221,8 @@ function App() {
             <Route path="/configuracoes-fiscais" element={<ProtectedRoute><ConfiguracoesFiscaisPage /></ProtectedRoute>} />
             <Route path="/dashboard/notas-fiscais" element={<ProtectedRoute><NotasFiscaisPage /></ProtectedRoute>} />
             <Route path="/dashboard/notas-compra" element={<ProtectedRoute><NotasCompraPage /></ProtectedRoute>} />
-            <Route path="/dashboard/cobrancas" element={<ProtectedRoute><CobrancasPage /></ProtectedRoute>} />
+            <Route path="/dashboard/cobrancas" element={<ProtectedRoute><CobrancasPage key="cobrancas" /></ProtectedRoute>} />
+            <Route path="/dashboard/clientes-fiscais" element={<ProtectedRoute><CobrancasPage key="clientes" abaInicial="clientes" /></ProtectedRoute>} />
 
             {/* Rotas do módulo WhatsApp (Evolution API) */}
             <Route path="/dashboard/whatsapp/configuracao" element={<ProtectedRoute><WhatsAppConfiguracaoPage /></ProtectedRoute>} />
