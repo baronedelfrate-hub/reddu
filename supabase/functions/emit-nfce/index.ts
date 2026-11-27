@@ -1,5 +1,6 @@
 import { corsHeaders } from "./cors.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
+import { converterParaNFe, ehDestinatarioCnpj, emitirNFe } from './nfe.ts';
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -35,6 +36,29 @@ Deno.serve(async (req) => {
     const missingFields = requiredFields.filter(field => !config[field]);
     if (missingFields.length > 0) {
       throw new Error(`Campos de endereço obrigatórios ausentes nas configurações fiscais: ${missingFields.join(', ')}`);
+    }
+
+    // Destinatário CNPJ: NFC-e não é mais permitida (Ajuste SINIEF 11/2025) -> NF-e modelo 55.
+    if (payload && ehDestinatarioCnpj(payload)) {
+      const doc = String(payload.cnpj_destinatario).replace(/\D/g, '');
+      const { data: cliente } = await supabaseClient
+        .from('clientes_cobranca')
+        .select('razao_social, email, cep, logradouro, numero, complemento, bairro, municipio, uf')
+        .eq('empresa_id', empresa_id)
+        .eq('documento', doc)
+        .maybeSingle();
+
+      const payloadNFe = converterParaNFe(payload, cliente);
+      const r = await emitirNFe({ urlApiNfce: url_api, token: config.token_api_focus, ref: String(venda_id), payload: payloadNFe });
+      const json = (obj: unknown) => new Response(JSON.stringify(obj), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
+      if (r.tipo === 'autorizado') {
+        return json({ success: true, modelo: '55', nfe_id: r.ref, nfe_chave: r.chave, nfe_url_pdf: r.danfe });
+      }
+      if (r.tipo === 'processando') {
+        return json({ success: false, pendente: true, modelo: '55', erro: 'A NF-e ainda está sendo processada pela SEFAZ. Aguarde alguns segundos e tente novamente.' });
+      }
+      return json({ success: false, modelo: '55', erro: r.mensagem });
     }
 
     if (payload) {
