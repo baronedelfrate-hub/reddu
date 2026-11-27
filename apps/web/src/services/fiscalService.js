@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/customSupabaseClient';
 import { validateNFcePayload } from '@/utils/validateNFcePayload';
+import { avisarCnpjSemCadastro } from '@/utils/avisoCnpj';
 
 export const fiscalService = {
   /**
@@ -295,6 +296,8 @@ const totalVenda = Math.round((valorTotalProdutos - descontoValor) * 100) / 100;
       if (!validation.valid) {
         throw new Error(`Falha na validação do Payload: \n${validation.errors.join('\n')}`);
       }
+
+      avisarCnpjSemCadastro(payload.cnpj_destinatario, empresaId);
 
       // Invoke secure Edge Function
       const { data, error } = await supabase.functions.invoke('emit-nfce', {

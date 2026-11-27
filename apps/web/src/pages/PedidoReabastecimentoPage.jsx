@@ -19,6 +19,7 @@ import CPFNaNotaInput from '@/components/fiscal/CPFNaNotaInput';
 import NFCeStatusBadge from '@/components/fiscal/NFCeStatusBadge';
 import { Input } from '@/components/ui/input';
 import { validateNFcePayload } from '@/utils/validateNFcePayload';
+import { avisarCnpjSemCadastro } from '@/utils/avisoCnpj';
 import { recordMarketplaceSale } from '@/services/salesService';
 
 // ─── Serviço de emissão de NF do Faturamento de Reabastecimento ───────────
@@ -314,6 +315,8 @@ const fiscalReabastecimentoService = {
         throw new Error(`Falha na validação do Payload:\n${validation.errors.join('\n')}`);
       }
 
+      avisarCnpjSemCadastro(docLimpo, empresaId);
+
       const { data, error } = await supabase.functions.invoke('emit-nfce', {
         body: {
           venda_id: pedidoMercado.id, // usado só como referência de idempotência na Focus
@@ -403,6 +406,8 @@ const fiscalReabastecimentoService = {
 
       // Referência única pra Focus, combinando os mercados envolvidos.
       const refCombinada = 'combo-' + idsMercados.map((id) => id.split('-')[0]).join('-');
+
+      avisarCnpjSemCadastro(docLimpo, empresaId);
 
       const { data, error } = await supabase.functions.invoke('emit-nfce', {
         body: {
